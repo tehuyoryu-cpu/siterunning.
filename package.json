@@ -1,0 +1,19 @@
+{
+  "name": "dlsite-price-tracker",
+  "version": "1.0.0",
+  "description": "DLsite price history collector - low-load, diff-only",
+  "main": "main.js",
+  "type": "commonjs",
+  "engines": { "node": ">=18.0.0" },
+  "scripts": {
+    "start": "node main.js",
+    "discover": "node main.js --mode=discover",
+    "fetch": "node main.js --mode=fetch",
+    "status": "node main.js --mode=status"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "cheerio": "^1.0.0",
+    "node-cron": "^3.0.3"
+  }
+}
