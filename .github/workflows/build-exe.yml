@@ -1,0 +1,55 @@
+name: Build Windows exe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install @yao-pkg/pkg
+        run: npm install -g @yao-pkg/pkg
+
+      - name: Create dist dir
+        run: mkdir -p dist
+
+      - name: Build exe
+        run: pkg . --target node22-win-x64 --output dist/dlsite-tracker.exe
+
+      - name: Smoke test (status)
+        run: dist\dlsite-tracker.exe --mode=status
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dlsite-tracker-win-x64
+          path: dist/dlsite-tracker.exe
+          retention-days: 30
+
+      - name: Create release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "Build #${{ github.run_number }}"
+          body: |
+            自動ビルド: dlsite-tracker.exe (Windows x64)
+            コミット: ${{ github.sha }}
+          files: dist/dlsite-tracker.exe
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

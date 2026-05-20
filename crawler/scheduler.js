@@ -82,8 +82,7 @@ function _startSaleBoostJob() {
 
     try {
       // find circles still on sale
-      const db_ = db.open();
-      const onSaleCircles = db_
+      const onSaleCircles = db.open()
         .prepare('SELECT maker_id FROM circles WHERE on_sale = 1')
         .all();
 

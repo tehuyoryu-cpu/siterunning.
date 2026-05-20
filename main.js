@@ -28,8 +28,8 @@ const args = Object.fromEntries(
 async function main() {
   log.info('[main] DLsite price tracker start', { args });
 
-  // Always open DB on start
-  db.open();
+  // Always init DB on start (async – loads WASM)
+  await db.init();
 
   const mode = args.mode;
   const rj   = args.rj;

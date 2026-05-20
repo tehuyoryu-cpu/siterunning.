@@ -2,47 +2,96 @@
 
 /**
  * crawler/db.js
- * SQLite access layer.
- * All schema migrations are forward-only (no drop/rename).
+ * SQLite access layer – sql.js (pure WASM, no native binaries).
+ *
+ * External API is identical to the better-sqlite3 version.
+ * Internal implementation uses sql.js with manual file persistence.
+ *
+ * Persistence strategy:
+ *   _save() is called after every mutating operation.
+ *   On startup, the DB file is loaded from disk if it exists.
+ *
+ * Initialisation:
+ *   await db.init()   – must be called once before any other function.
+ *   db.open()         – returns the live Database instance (throws if not ready).
  */
 
-const Database = require('better-sqlite3');
-const config   = require('../config');
-const log      = require('./logger');
+const initSqlJs = require('sql.js');
+const fs         = require('fs');
+const path       = require('path');
+const config     = require('../config');
+const log        = require('./logger');
 
-let _db = null;
+let _db      = null;   // sql.js Database instance
+let _SQL     = null;   // sql.js namespace
+const DB_PATH = path.resolve(config.db.path);
 
-// ─── open / init ────────────────────────────────────────────────────────────
+// ─── init / open / close ────────────────────────────────────────────────────
 
-function open() {
-  if (_db) return _db;
+/**
+ * Async initialisation. Must be awaited once before any DB call.
+ * Safe to call multiple times (idempotent).
+ */
+async function init() {
+  if (_db) return;
 
-  _db = new Database(config.db.path);
-  _db.pragma('journal_mode = WAL');
-  _db.pragma('foreign_keys = ON');
-  _db.pragma('synchronous = NORMAL');
+  // Locate the WASM file correctly both in dev and inside a pkg exe.
+  _SQL = await initSqlJs({
+    locateFile: file => {
+      if (process.pkg) {
+        // When running as pkg exe, WASM lives next to the executable.
+        return path.join(path.dirname(process.execPath), file);
+      }
+      return path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', file);
+    },
+  });
+
+  if (fs.existsSync(DB_PATH)) {
+    const buf = fs.readFileSync(DB_PATH);
+    _db = new _SQL.Database(buf);
+    log.info('[db] loaded', DB_PATH);
+  } else {
+    _db = new _SQL.Database();
+    log.info('[db] created', DB_PATH);
+  }
 
   _applySchema();
-  log.info('[db] opened', config.db.path);
+  _save();
+}
+
+/** Returns the live sql.js Database. Throws if init() was not awaited. */
+function open() {
+  if (!_db) throw new Error('[db] not initialised – await db.init() first');
   return _db;
 }
 
+function close() {
+  if (_db) {
+    _save();
+    _db.close();
+    _db = null;
+    log.info('[db] closed');
+  }
+}
+
+// ─── schema ─────────────────────────────────────────────────────────────────
+
 function _applySchema() {
-  _db.exec(`
+  _db.run(`
     CREATE TABLE IF NOT EXISTS works (
-      rj_code              TEXT    PRIMARY KEY,
-      title                TEXT,
-      circle               TEXT,
-      maker_id             TEXT,
-      work_type            TEXT,
-      site_id              TEXT    DEFAULT 'maniax',
-      release_date         TEXT,
-      dl_count             INTEGER DEFAULT 0,
-      first_seen           INTEGER NOT NULL,
-      last_checked         INTEGER DEFAULT 0,
-      check_interval       INTEGER DEFAULT 86400,
-      priority             INTEGER DEFAULT 20,
-      is_on_sale           INTEGER DEFAULT 0,
+      rj_code               TEXT    PRIMARY KEY,
+      title                 TEXT,
+      circle                TEXT,
+      maker_id              TEXT,
+      work_type             TEXT,
+      site_id               TEXT    DEFAULT 'maniax',
+      release_date          TEXT,
+      dl_count              INTEGER DEFAULT 0,
+      first_seen            INTEGER NOT NULL,
+      last_checked          INTEGER DEFAULT 0,
+      check_interval        INTEGER DEFAULT 86400,
+      priority              INTEGER DEFAULT 20,
+      is_on_sale            INTEGER DEFAULT 0,
       consecutive_no_change INTEGER DEFAULT 0
     );
 
@@ -65,33 +114,64 @@ function _applySchema() {
       works_count       INTEGER DEFAULT 0
     );
 
-    CREATE INDEX IF NOT EXISTS idx_ph_rj      ON price_history(rj_code);
-    CREATE INDEX IF NOT EXISTS idx_ph_at      ON price_history(checked_at);
+    CREATE INDEX IF NOT EXISTS idx_ph_rj       ON price_history(rj_code);
+    CREATE INDEX IF NOT EXISTS idx_ph_at       ON price_history(checked_at);
     CREATE INDEX IF NOT EXISTS idx_works_maker ON works(maker_id);
-    CREATE INDEX IF NOT EXISTS idx_works_due
-      ON works(last_checked, check_interval)
-      WHERE last_checked IS NOT NULL;
   `);
+}
+
+// ─── low-level query helpers ─────────────────────────────────────────────────
+
+/**
+ * Execute a SELECT and return the first row as a plain object, or null.
+ * @param {string} sql
+ * @param {Array}  params  positional values matching ? placeholders
+ */
+function _get(sql, params = []) {
+  const stmt = _db.prepare(sql);
+  stmt.bind(params);
+  const row = stmt.step() ? stmt.getAsObject() : null;
+  stmt.free();
+  return row;
+}
+
+/**
+ * Execute a SELECT and return all rows as plain objects.
+ */
+function _all(sql, params = []) {
+  const stmt = _db.prepare(sql);
+  stmt.bind(params);
+  const rows = [];
+  while (stmt.step()) rows.push(stmt.getAsObject());
+  stmt.free();
+  return rows;
+}
+
+/**
+ * Execute an INSERT / UPDATE / DELETE, then persist to disk.
+ */
+function _run(sql, params = []) {
+  const stmt = _db.prepare(sql);
+  stmt.bind(params);
+  stmt.step();
+  stmt.free();
+  _save();
+}
+
+/** Persist the in-memory DB to disk. Called after every mutation. */
+function _save() {
+  const data = _db.export();
+  fs.writeFileSync(DB_PATH, Buffer.from(data));
 }
 
 // ─── works ──────────────────────────────────────────────────────────────────
 
-/**
- * Upsert a work row. Does NOT overwrite last_checked / priority if already set.
- * @param {object} w  { rj_code, title, circle, maker_id, work_type, site_id,
- *                      release_date, dl_count }
- */
 function upsertWork(w) {
-  const db  = open();
-  const now = unixNow();
-
-  db.prepare(`
+  _run(`
     INSERT INTO works
       (rj_code, title, circle, maker_id, work_type, site_id,
        release_date, dl_count, first_seen)
-    VALUES
-      (@rj_code, @title, @circle, @maker_id, @work_type, @site_id,
-       @release_date, @dl_count, @now)
+    VALUES (?,?,?,?,?,?,?,?,?)
     ON CONFLICT(rj_code) DO UPDATE SET
       title        = excluded.title,
       circle       = excluded.circle,
@@ -100,148 +180,142 @@ function upsertWork(w) {
       site_id      = excluded.site_id,
       release_date = excluded.release_date,
       dl_count     = COALESCE(excluded.dl_count, works.dl_count)
-  `).run({ ...w, now });
+  `, [
+    w.rj_code, w.title, w.circle, w.maker_id, w.work_type,
+    w.site_id, w.release_date, w.dl_count ?? 0, unixNow(),
+  ]);
 }
 
-/**
- * Update fields set by the detail fetcher after a successful fetch.
- */
 function markChecked(rjCode, fields) {
-  const db = open();
-  db.prepare(`
+  _run(`
     UPDATE works SET
-      last_checked          = @now,
-      check_interval        = @check_interval,
-      priority              = @priority,
-      is_on_sale            = @is_on_sale,
-      consecutive_no_change = @consecutive_no_change
-    WHERE rj_code = @rj_code
-  `).run({ rj_code: rjCode, now: unixNow(), ...fields });
+      last_checked          = ?,
+      check_interval        = ?,
+      priority              = ?,
+      is_on_sale            = ?,
+      consecutive_no_change = ?
+    WHERE rj_code = ?
+  `, [
+    unixNow(),
+    fields.check_interval,
+    fields.priority,
+    fields.is_on_sale,
+    fields.consecutive_no_change,
+    rjCode,
+  ]);
 }
 
-/**
- * Returns works whose next check time has passed.
- * next_check = last_checked + check_interval
- */
 function getDueWorks(limit = 50) {
-  const db  = open();
   const now = unixNow();
-  return db.prepare(`
+  return _all(`
     SELECT * FROM works
-    WHERE (last_checked + check_interval) <= @now
+    WHERE (last_checked + check_interval) <= ?
     ORDER BY priority DESC, (last_checked + check_interval) ASC
-    LIMIT @limit
-  `).all({ now, limit });
+    LIMIT ?
+  `, [now, limit]);
 }
 
 function getWorkByRj(rjCode) {
-  return open().prepare('SELECT * FROM works WHERE rj_code = ?').get(rjCode);
+  return _get('SELECT * FROM works WHERE rj_code = ?', [rjCode]);
 }
 
 function getAllMakerIds() {
-  return open()
-    .prepare('SELECT DISTINCT maker_id FROM works WHERE maker_id IS NOT NULL')
-    .all()
-    .map(r => r.maker_id);
+  return _all(
+    'SELECT DISTINCT maker_id FROM works WHERE maker_id IS NOT NULL'
+  ).map(r => r.maker_id);
 }
 
-/** Boost priority of all works belonging to a circle */
 function boostCircleWorks(makerId, priority, checkInterval) {
-  const db = open();
-  db.prepare(`
+  _run(`
     UPDATE works
-    SET priority = @priority,
-        check_interval = @checkInterval,
-        is_on_sale = 1
-    WHERE maker_id = @makerId
-  `).run({ makerId, priority, checkInterval });
+    SET priority = ?, check_interval = ?, is_on_sale = 1
+    WHERE maker_id = ?
+  `, [priority, checkInterval, makerId]);
 }
 
 // ─── price_history ──────────────────────────────────────────────────────────
 
-/** Returns the most recent price_history row for an RJ code, or null. */
 function getLatestPrice(rjCode) {
-  return open().prepare(`
+  return _get(`
     SELECT * FROM price_history
     WHERE rj_code = ?
     ORDER BY checked_at DESC
     LIMIT 1
-  `).get(rjCode);
+  `, [rjCode]);
 }
 
 /**
  * Insert a price row only when the price has changed vs the last record.
- * Returns true if a row was inserted (price changed).
+ * Returns true if a row was inserted.
  */
 function savePriceIfChanged(rjCode, priceData) {
   const last = getLatestPrice(rjCode);
 
   const changed =
     !last ||
-    last.price         !== priceData.price         ||
-    last.sale_price    !== priceData.sale_price    ||
-    last.discount_rate !== priceData.discount_rate ||
-    last.point         !== priceData.point;
+    last.price         !== (priceData.price         ?? null) ||
+    last.sale_price    !== (priceData.sale_price    ?? null) ||
+    last.discount_rate !== (priceData.discount_rate ?? null) ||
+    last.point         !== (priceData.point         ?? null);
 
   if (!changed) return false;
 
-  open().prepare(`
+  _run(`
     INSERT INTO price_history
       (rj_code, price, sale_price, point, discount_rate, checked_at)
-    VALUES
-      (@rj_code, @price, @sale_price, @point, @discount_rate, @checked_at)
-  `).run({
-    rj_code:       rjCode,
-    price:         priceData.price         ?? null,
-    sale_price:    priceData.sale_price    ?? null,
-    point:         priceData.point         ?? null,
-    discount_rate: priceData.discount_rate ?? null,
-    checked_at:    unixNow(),
-  });
+    VALUES (?,?,?,?,?,?)
+  `, [
+    rjCode,
+    priceData.price         ?? null,
+    priceData.sale_price    ?? null,
+    priceData.point         ?? null,
+    priceData.discount_rate ?? null,
+    unixNow(),
+  ]);
 
   return true;
 }
 
 function getPriceHistory(rjCode) {
-  return open().prepare(`
-    SELECT * FROM price_history WHERE rj_code = ? ORDER BY checked_at ASC
-  `).all(rjCode);
+  return _all(
+    'SELECT * FROM price_history WHERE rj_code = ? ORDER BY checked_at ASC',
+    [rjCode]
+  );
 }
 
 // ─── circles ────────────────────────────────────────────────────────────────
 
 function upsertCircle(makerId, circleName) {
-  open().prepare(`
+  _run(`
     INSERT INTO circles (maker_id, circle_name, works_count)
-    VALUES (@makerId, @circleName, 1)
+    VALUES (?,?,1)
     ON CONFLICT(maker_id) DO UPDATE SET
-      circle_name  = excluded.circle_name,
-      works_count  = works_count + 1
-  `).run({ makerId, circleName });
+      circle_name = excluded.circle_name,
+      works_count = works_count + 1
+  `, [makerId, circleName]);
 }
 
 function markCircleOnSale(makerId, onSale) {
-  open().prepare(`
+  _run(`
     UPDATE circles
-    SET on_sale = @onSale,
-        sale_detected_at = CASE WHEN @onSale = 1 THEN @now ELSE sale_detected_at END
-    WHERE maker_id = @makerId
-  `).run({ makerId, onSale: onSale ? 1 : 0, now: unixNow() });
+    SET on_sale          = ?,
+        sale_detected_at = CASE WHEN ? = 1 THEN ? ELSE sale_detected_at END
+    WHERE maker_id = ?
+  `, [onSale ? 1 : 0, onSale ? 1 : 0, unixNow(), makerId]);
 }
 
 function getCircle(makerId) {
-  return open().prepare('SELECT * FROM circles WHERE maker_id = ?').get(makerId);
+  return _get('SELECT * FROM circles WHERE maker_id = ?', [makerId]);
 }
 
 // ─── stats ──────────────────────────────────────────────────────────────────
 
 function getStats() {
-  const db = open();
   return {
-    totalWorks:    db.prepare('SELECT COUNT(*) AS n FROM works').get().n,
-    onSale:        db.prepare('SELECT COUNT(*) AS n FROM works WHERE is_on_sale = 1').get().n,
-    priceChanges:  db.prepare('SELECT COUNT(*) AS n FROM price_history').get().n,
-    circlesOnSale: db.prepare('SELECT COUNT(*) AS n FROM circles WHERE on_sale = 1').get().n,
+    totalWorks:    _get('SELECT COUNT(*) AS n FROM works').n,
+    onSale:        _get('SELECT COUNT(*) AS n FROM works WHERE is_on_sale = 1').n,
+    priceChanges:  _get('SELECT COUNT(*) AS n FROM price_history').n,
+    circlesOnSale: _get('SELECT COUNT(*) AS n FROM circles WHERE on_sale = 1').n,
     dueNow:        getDueWorks(9999).length,
   };
 }
@@ -252,15 +326,8 @@ function unixNow() {
   return Math.floor(Date.now() / 1000);
 }
 
-function close() {
-  if (_db) {
-    _db.close();
-    _db = null;
-    log.info('[db] closed');
-  }
-}
-
 module.exports = {
+  init,
   open,
   close,
   upsertWork,

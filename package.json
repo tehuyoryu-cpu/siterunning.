@@ -14,9 +14,9 @@
     "status": "node main.js --mode=status"
   },
   "dependencies": {
-    "better-sqlite3": "^9.4.3",
     "cheerio": "^1.0.0",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "sql.js": "^1.14.1"
   },
   "bin": "main.js",
   "pkg": {
@@ -25,7 +25,11 @@
     ],
     "outputPath": "dist",
     "assets": [
-      "node_modules/better-sqlite3/build/Release/*.node"
+      "node_modules/sql.js/dist/sql-wasm.wasm"
+    ],
+    "scripts": [
+      "crawler/*.js",
+      "config.js"
     ]
   }
 }
