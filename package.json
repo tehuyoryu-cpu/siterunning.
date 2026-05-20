@@ -4,7 +4,9 @@
   "description": "DLsite price history collector - low-load, diff-only",
   "main": "main.js",
   "type": "commonjs",
-  "engines": { "node": ">=18.0.0" },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "start": "node main.js",
     "discover": "node main.js --mode=discover",
@@ -15,5 +17,15 @@
     "better-sqlite3": "^9.4.3",
     "cheerio": "^1.0.0",
     "node-cron": "^3.0.3"
+  },
+  "bin": "main.js",
+  "pkg": {
+    "targets": [
+      "node18-win-x64"
+    ],
+    "outputPath": "dist",
+    "assets": [
+      "node_modules/better-sqlite3/build/Release/*.node"
+    ]
   }
 }
