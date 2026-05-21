@@ -106,6 +106,16 @@ function _startSaleBoostJob() {
   log.info('[scheduler] saleBoost job scheduled', config.cron.saleBoost);
 }
 
+// ─── daily backup job ────────────────────────────────────────────────────────
+
+function _startBackupJob() {
+  cron.schedule('0 3 * * *', () => {
+    try { db.backup(); }
+    catch (err) { log.error('[scheduler] backup error', err.message); }
+  });
+  log.info('[scheduler] backup job scheduled (daily 03:00)');
+}
+
 // ─── public API ─────────────────────────────────────────────────────────────
 
 /**
@@ -118,6 +128,7 @@ async function start() {
   _startDiscoveryJob();
   _startDetailJob();
   _startSaleBoostJob();
+  _startBackupJob();
 
   // Initial run on startup (don't wait for cron trigger)
   log.info('[scheduler] running initial passes on startup');

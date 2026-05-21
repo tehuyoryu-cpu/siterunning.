@@ -5,6 +5,11 @@ module.exports = {
     path: './dlsite.db',
   },
 
+  server: {
+    port: process.env.PORT ? parseInt(process.env.PORT) : 3000,
+    host: '127.0.0.1',
+  },
+
   fetch: {
     timeout: 20000,       // ms per request
     retryMax: 3,
@@ -39,6 +44,11 @@ module.exports = {
     popular:     40,
     normal:      20,
     cold:         5,
+  },
+
+  ui: {
+    port: 7777,
+    host: '127.0.0.1',
   },
 
   dlsite: {

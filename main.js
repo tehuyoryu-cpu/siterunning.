@@ -5,16 +5,19 @@
  * Entry point.
  *
  * Usage:
- *   node main.js                  – daemon mode (scheduler)
+ *   node main.js                  – daemon mode (scheduler + UI)
+ *   node main.js --mode=ui        – UI only (no crawler)
  *   node main.js --mode=discover  – one-shot discovery run
  *   node main.js --mode=fetch     – one-shot detail fetch run
  *   node main.js --mode=status    – print DB stats and exit
  *   node main.js --rj=RJ123456   – fetch one specific RJ code
+ *   --port=3000                   – UI port (default 3000)
  */
 
 const log       = require('./crawler/logger');
 const db        = require('./crawler/db');
 const scheduler = require('./crawler/scheduler');
+const { start: startApiServer } = require('./crawler/apiServer');
 const { runDiscovery }    = require('./crawler/discovery');
 const { runDetailFetch, fetchAndStore } = require('./crawler/detailFetcher');
 
@@ -70,7 +73,17 @@ async function main() {
     return;
   }
 
+  // ── UI only (no crawler) ────────────────────────────────────────────────
+  if (mode === 'ui') {
+    startApiServer();
+    log.info('[main] UI-only mode. Press Ctrl+C to stop.');
+    process.on('SIGINT',  _shutdown);
+    process.on('SIGTERM', _shutdown);
+    return;
+  }
+
   // ── daemon mode ──────────────────────────────────────────────────────────
+  startApiServer();
   await scheduler.start();
   log.info('[main] daemon running – press Ctrl+C to stop');
 

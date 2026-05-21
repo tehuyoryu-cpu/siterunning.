@@ -320,7 +320,119 @@ function getStats() {
   };
 }
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+// ─── backup ──────────────────────────────────────────────────────────────────
+
+/**
+ * Save a timestamped copy of the DB file to ./backups/.
+ * Called by the scheduler daily. Keeps last 30 backups.
+ */
+function backup() {
+  if (!_db) return;
+  try {
+    const dir     = path.resolve(path.dirname(DB_PATH), 'backups');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    const stamp   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const dest    = path.join(dir, `dlsite-${stamp}.db`);
+    const data    = _db.export();
+    fs.writeFileSync(dest, Buffer.from(data));
+    log.info('[db] backup saved', dest);
+
+    // keep only the 30 most recent backups
+    const files = fs.readdirSync(dir)
+      .filter(f => f.startsWith('dlsite-') && f.endsWith('.db'))
+      .sort()
+      .reverse();
+    for (const old of files.slice(30)) {
+      fs.unlinkSync(path.join(dir, old));
+      log.debug('[db] old backup removed', old);
+    }
+  } catch (err) {
+    log.error('[db] backup error', err.message);
+  }
+}
+
+// ─── export (for CSV/JSON API) ───────────────────────────────────────────────
+
+/**
+ * Export all price_history rows joined with work metadata.
+ * Returns an array of plain objects.
+ */
+function exportAllHistory() {
+  const db = open();
+  return _all(`
+    SELECT
+      w.rj_code, w.title, w.circle, w.maker_id, w.work_type,
+      w.release_date,
+      p.price, p.sale_price, p.discount_rate, p.point, p.checked_at
+    FROM price_history p
+    JOIN works w ON p.rj_code = w.rj_code
+    ORDER BY p.checked_at ASC
+  `);
+}
+
+// ─── UI query helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Paginated works list with latest price joined.
+ * Used by apiServer /api/works
+ */
+function searchWorks({ q = '', sort = 'priority', onSale = false, page = 1, limit = 50 } = {}) {
+  const offset = (Math.max(1, page) - 1) * limit;
+
+  const sortMap = {
+    priority: 'w.priority DESC, w.last_checked DESC',
+    discount: 'ph.discount_rate DESC',
+    price:    'ph.price ASC',
+    checked:  'w.last_checked DESC',
+    release:  'w.release_date DESC',
+  };
+  const orderBy = sortMap[sort] ?? sortMap.priority;
+
+  let where  = onSale ? 'AND w.is_on_sale = 1 ' : '';
+  const params = [];
+
+  if (q) {
+    where += 'AND (LOWER(w.rj_code) LIKE ? OR LOWER(COALESCE(w.title,\'\')) LIKE ? OR LOWER(COALESCE(w.circle,\'\')) LIKE ?) ';
+    const like = '%' + q.toLowerCase() + '%';
+    params.push(like, like, like);
+  }
+
+  const baseSql = `
+    FROM works w
+    LEFT JOIN price_history ph ON ph.id = (
+      SELECT id FROM price_history WHERE rj_code = w.rj_code ORDER BY checked_at DESC LIMIT 1
+    )
+    WHERE 1=1 ${where}
+  `;
+
+  const total  = (_get(`SELECT COUNT(*) AS n ${baseSql}`, params) ?? { n: 0 }).n;
+  const works  = _all(
+    `SELECT w.*, ph.price, ph.sale_price, ph.discount_rate, ph.checked_at AS ph_checked_at ${baseSql}ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+    [...params, limit, offset]
+  );
+
+  return { works, total, page, pages: Math.ceil(total / limit) };
+}
+
+/**
+ * Works currently on sale, sorted by discount rate desc.
+ */
+function getSaleWorks(limit = 200) {
+  return _all(`
+    SELECT w.rj_code, w.title, w.circle, w.maker_id,
+           ph.price, ph.sale_price, ph.discount_rate, ph.checked_at
+    FROM works w
+    JOIN price_history ph ON ph.id = (
+      SELECT id FROM price_history WHERE rj_code = w.rj_code ORDER BY checked_at DESC LIMIT 1
+    )
+    WHERE w.is_on_sale = 1 AND ph.discount_rate IS NOT NULL
+    ORDER BY ph.discount_rate DESC
+    LIMIT ?
+  `, [limit]);
+}
+
+
 
 function unixNow() {
   return Math.floor(Date.now() / 1000);
@@ -343,5 +455,9 @@ module.exports = {
   markCircleOnSale,
   getCircle,
   getStats,
+  backup,
+  exportAllHistory,
+  searchWorks,
+  getSaleWorks,
   unixNow,
 };
