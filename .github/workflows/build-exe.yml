@@ -13,31 +13,38 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout (workaround for repo name ending in dot)
+        uses: actions/checkout@v4
+        with:
+          path: app
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
+          cache-dependency-path: app/package-lock.json
 
       - name: Install dependencies
+        working-directory: app
         run: npm install
 
       - name: Build portable exe
+        working-directory: app
         run: npx electron-builder --win portable --x64
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false   # コード署名スキップ
+          CSC_IDENTITY_AUTO_DISCOVERY: false
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: List dist contents
+      - name: List dist
+        working-directory: app
         run: dir dist
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: DLsiteTracker-win-x64
-          path: dist/*.exe
+          path: app/dist/*.exe
           if-no-files-found: error
           retention-days: 90
 
@@ -48,11 +55,8 @@ jobs:
           name: "Build #${{ github.run_number }}"
           body: |
             ## DLsite Price Tracker - Windows版
-
-            ダウンロードして実行するだけで使えます（インストール不要）。
-
-            **起動方法:** ダウンロードした `.exe` をダブルクリック
-          files: dist/*.exe
+            ダウンロードした `.exe` をダブルクリックするだけで起動します（インストール不要）。
+          files: app/dist/*.exe
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
