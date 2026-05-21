@@ -14,8 +14,9 @@ module.exports = {
     timeout: 20000,       // ms per request
     retryMax: 3,
     retryBaseDelay: 3000, // ms, doubles each retry
-    concurrency: 2,       // parallel requests
-    rateLimit: 2000,      // ms minimum between requests (same host)
+    concurrency: 3,       // parallel requests
+    rateLimit: 1500,      // ms minimum between requests (same host)
+    batchSize: 50,        // RJ codes per product/info/ajax call
   },
 
   // node-cron expressions
