@@ -192,4 +192,72 @@ function _upsertNewWithPrice(items, siteId, knownRjs) {
   return newItems.length;
 }
 
-module.exports = { runDiscovery };
+// ─── 全収集 (FSR全ページ走査) ────────────────────────────────────────────────
+
+/**
+ * FSR URLを使って全作品・全セール作品を網羅的に収集。
+ * 通常discoveryより時間がかかるが、取りこぼしなし。
+ *
+ * @param {object} opts
+ *   sale {boolean}    - trueでセール作品のみ
+ *   maxPages {number} - 最大ページ数 (0=無制限)
+ *   onProgress {function} - ({ site, page, found, total }) コールバック
+ */
+async function runFullScan({ sale = false, maxPages = 0, onProgress = null } = {}) {
+  log.info('[discovery] fullScan start', { sale, maxPages });
+  const fsrUrls = config.dlsite.fsrUrls;
+  const summary = {};
+  let grandTotal = 0;
+
+  for (const [site, urls] of Object.entries(fsrUrls)) {
+    const baseUrl = sale ? urls.sale : urls.all;
+    if (!baseUrl) continue;
+
+    let page = 1;
+    let siteTotal = 0;
+
+    while (true) {
+      if (maxPages > 0 && page > maxPages) {
+        log.info('[discovery] fullScan maxPages reached', { site, page });
+        break;
+      }
+
+      const url   = baseUrl.replace('{page}', page);
+      const items = await _fetchAndParseWithPrice(url);
+
+      if (!items.length) {
+        log.info('[discovery] fullScan end of pages', { site, page });
+        break;
+      }
+
+      // knownRjs をDBから都度取得（全収集は長時間なので鮮度を保つ）
+      const knownSet = new Set(
+        db.open().exec('SELECT rj_code FROM works')[0]?.values?.map(r => r[0]) ?? []
+      );
+      const added = _upsertNewWithPrice(items, site, knownSet);
+      siteTotal += added;
+      grandTotal += added;
+
+      if (onProgress) {
+        onProgress({ site, page, found: added, total: siteTotal });
+      }
+
+      log.info('[discovery] fullScan page', { site, page, found: added, siteTotal });
+
+      if (items.length < 100) {
+        // 100件未満 = 最終ページ
+        break;
+      }
+
+      page++;
+      await sleep(config.fetch.rateLimit);
+    }
+
+    summary[site] = siteTotal;
+  }
+
+  log.info('[discovery] fullScan done', { grandTotal, ...summary });
+  return { grandTotal, sites: summary };
+}
+
+module.exports = { runDiscovery, runFullScan };

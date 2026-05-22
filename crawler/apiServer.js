@@ -13,6 +13,11 @@
  *   GET /api/sales           → works currently on sale (sorted by discount)
  *   GET /api/export/json     → full price_history JSON download
  *   GET /api/export/csv      → full price_history CSV download
+ *   GET /api/run/status      → job running flags
+ *   POST /api/run/discover   → 即時 discovery 実行
+ *   POST /api/run/fetch      → 即時 detail fetch 実行
+ *   POST /api/run/saleboost  → 即時 sale boost 実行
+ *   POST /api/run/all        → 全ジョブ即時実行
  */
 
 const http   = require('http');
@@ -22,6 +27,77 @@ const log    = require('./logger');
 const config = require('../config');
 
 // ─── API handlers ────────────────────────────────────────────────────────────
+
+// ジョブ実行状態（重複起動防止）
+const _jobRunning = { discover: false, fetch: false, saleboost: false, fullscan: false, fullscan_sale: false, all: false };
+
+/** POST /api/run/:job  → 即時実行トリガー */
+async function handleRun(job, res) {
+  if (_jobRunning[job]) {
+    return _json(res, { ok: false, message: `${job} is already running` });
+  }
+  _jobRunning[job] = true;
+
+  // レスポンスをすぐ返してからバックグラウンドで実行
+  _json(res, { ok: true, message: `${job} started` });
+
+  try {
+    if (job === 'discover') {
+      await runDiscovery();
+    } else if (job === 'fetch') {
+      await detailFetcher.runDetailFetch(300);
+    } else if (job === 'saleboost') {
+      const circles = db.getCirclesOnSale();
+      db.transaction(() => {
+        for (const { maker_id } of circles) {
+          db.boostCircleWorks(maker_id, 100, 7200);
+        }
+      });
+      db.syncCircleWorksCounts();
+      log.info('[api] saleboost done, circles:', circles.length);
+    } else if (job === 'all') {
+      await runDiscovery();
+      await detailFetcher.runDetailFetch(300);
+      const circles = db.getCirclesOnSale();
+      db.transaction(() => {
+        for (const { maker_id } of circles) {
+          db.boostCircleWorks(maker_id, 100, 7200);
+        }
+      });
+    } else if (job === 'fullscan' || job === 'fullscan_sale') {
+      const sale = job === 'fullscan_sale';
+      const result = await runFullScan({
+        sale,
+        maxPages: 0,
+        onProgress: ({ site, page, found, total }) => {
+          log.info('[api] fullScan progress', { site, page, found, total });
+          _fullScanProgress = { site, page, found, total, sale };
+        },
+      });
+      _fullScanProgress = { done: true, ...result };
+      log.info('[api] fullScan done', result);
+    }
+  } catch (err) {
+    log.error('[api] run error', job, err.message);
+  } finally {
+    _jobRunning[job] = false;
+  }
+}
+
+let _fullScanProgress = null;
+
+/** GET /api/run/status → 各ジョブの実行中フラグ + fullScan進捗 */
+function handleRunStatus() {
+  return {
+    discover:        _jobRunning.discover,
+    fetch:           _jobRunning.fetch,
+    saleboost:       _jobRunning.saleboost,
+    all:             _jobRunning.discover || _jobRunning.fetch,
+    fullscan:        _jobRunning.fullscan ?? false,
+    fullscan_sale:   _jobRunning.fullscan_sale ?? false,
+    fullScanProgress: _fullScanProgress,
+  };
+}
 
 function handleStats() {
   return db.getStats();
@@ -106,6 +182,19 @@ function createServer() {
 
       if (pathname === '/api/sales') {
         return _json(res, handleSales());
+      }
+
+      if (pathname === '/api/run/status') {
+        return _json(res, handleRunStatus());
+      }
+
+      const runMatch = pathname.match(/^\/api\/run\/(discover|fetch|saleboost|all|fullscan|fullscan_sale)$/);
+      if (runMatch) {
+        if (req.method !== 'POST') {
+          res.writeHead(405); res.end('POST only'); return;
+        }
+        handleRun(runMatch[1], res);  // レスポンスは関数内で返す
+        return;
       }
 
       if (pathname === '/api/export/json') {
@@ -247,6 +336,9 @@ body {
 .tb-btn.active { background:#cce4f7; border-color:#005499; }
 .tb-btn svg    { width:16px; height:16px; flex-shrink:0; }
 .tb-sep { width:1px; background:#999; height:20px; margin:0 3px; }
+.tb-btn.running { background:#fff4cc; border-color:#cc8800; color:#884400; cursor:wait; }
+.tb-btn.running svg { animation: spin 1s linear infinite; }
+@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
 
 /* ── アドレスバー風フィルタ行 ── */
 .filterbar {
@@ -581,6 +673,32 @@ body {
     <svg viewBox="0 0 16 16"><rect x="2" y="1" width="10" height="13" rx="1" fill="#fff" stroke="#888"/><path d="M8 1v4h4" fill="none" stroke="#888"/><text x="8" y="12" text-anchor="middle" fill="#cc6600" font-size="6" font-family="monospace" font-weight="bold">{}</text></svg>
     JSONで保存
   </button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnDiscover" onclick="runJob('discover')" title="新着/ランキング/セールを巡回してRJ収集">
+    <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#0078d7" stroke-width="1.5"/><path d="M8 4v4l3 1.5" stroke="#0078d7" stroke-width="1.3" stroke-linecap="round"/></svg>
+    RJ収集
+  </button>
+  <button class="tb-btn" id="btnFetch" onclick="runJob('fetch')" title="未取得・期限切れ作品の価格を更新">
+    <svg viewBox="0 0 16 16"><path d="M2 8h12M10 4l4 4-4 4" stroke="#0078d7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+    価格更新
+  </button>
+  <button class="tb-btn" id="btnSaleboost" onclick="runJob('saleboost')" title="セール中サークルの優先度を維持">
+    <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="#cc0000"/><text x="8" y="11.5" text-anchor="middle" fill="white" font-size="8" font-family="sans-serif" font-weight="bold">S</text></svg>
+    セール優先
+  </button>
+  <button class="tb-btn" id="btnAll" onclick="runJob('all')" title="全て巡回" style="font-weight:bold">
+    <svg viewBox="0 0 16 16"><path d="M8 1v3M8 12v3M1 8h3M12 8h3" stroke="#006600" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="8" r="3.5" fill="#006600"/></svg>
+    全て巡回
+  </button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnFullscan" onclick="runJob('fullscan')" title="FSR全ページ走査 — 全作品を網羅収集（時間がかかります）">
+    <svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="2" fill="none" stroke="#660066" stroke-width="1.3"/><path d="M4 8h8M8 4v8" stroke="#660066" stroke-width="1.5" stroke-linecap="round"/></svg>
+    全収集
+  </button>
+  <button class="tb-btn" id="btnFullscanSale" onclick="runJob('fullscan_sale')" title="セール作品を全ページ走査">
+    <svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="2" fill="none" stroke="#cc0000" stroke-width="1.3"/><path d="M4 8h8M8 4v8" stroke="#cc0000" stroke-width="1.5" stroke-linecap="round"/></svg>
+    全セール収集
+  </button>
 </div>
 
 <!-- フィルタバー -->
@@ -900,6 +1018,73 @@ function onSearch() {
 }
 
 function exportData(fmt) { window.open('/api/export/' + fmt, '_blank'); }
+
+// ── ジョブ実行 ────────────────────────────────────────────────────────────
+const _JOB_LABELS = {
+  discover:      'RJ収集',
+  fetch:         '価格更新',
+  saleboost:     'セール優先',
+  all:           '全て巡回',
+  fullscan:      '全収集',
+  fullscan_sale: '全セール収集',
+};
+
+async function runJob(job) {
+  const btn = document.getElementById('btn' + job.charAt(0).toUpperCase() + job.slice(1));
+  if (!btn || btn.classList.contains('running')) return;
+
+  btn.classList.add('running');
+  btn.title = '実行中...';
+  setStatus(_JOB_LABELS[job] + ' 実行中...');
+
+  try {
+    const r = await fetch('/api/run/' + job, { method: 'POST' });
+    const d = await r.json();
+    if (!d.ok) {
+      setStatus('⚠ ' + d.message);
+      btn.classList.remove('running');
+      btn.title = _JOB_LABELS[job];
+      return;
+    }
+    setStatus(_JOB_LABELS[job] + ' 開始 — 完了後に統計が更新されます');
+
+    // 完了を検知するまでポーリング
+    await _waitJobDone(job, btn);
+  } catch (e) {
+    setStatus('エラー: ' + e.message);
+    btn.classList.remove('running');
+  }
+}
+
+async function _waitJobDone(job, btn) {
+  const checkKey = job === 'all' ? 'discover' : job;
+  let tries = 0;
+  const id = setInterval(async () => {
+    tries++;
+    const s = await api('/api/run/status');
+    if (!s) return;
+
+    // 全収集の進捗をステータスバーに表示
+    if ((job === 'fullscan' || job === 'fullscan_sale') && s.fullScanProgress && !s.fullScanProgress.done) {
+      const p = s.fullScanProgress;
+      setStatus('全収集中... ' + p.site + ' p.' + p.page + ' (新規:' + p.total + '件)');
+    }
+
+    if (!s[checkKey] || tries > 600) {
+      clearInterval(id);
+      btn.classList.remove('running');
+      btn.title = _JOB_LABELS[job];
+      await loadStats();
+      await loadWorks(_page);
+      const p = s.fullScanProgress;
+      if (p && p.done) {
+        setStatus('全収集完了 — 新規: ' + (p.grandTotal ?? 0) + ' 件');
+      } else {
+        setStatus(_JOB_LABELS[job] + ' 完了');
+      }
+    }
+  }, 2000);
+}
 
 // ── Utils ──────────────────────────────────────────────────────────────────
 async function api(path) {

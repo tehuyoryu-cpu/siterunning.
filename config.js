@@ -53,8 +53,24 @@ module.exports = {
   },
 
   dlsite: {
+    sites: ['maniax', 'girls'],
+
+    // ユーザー提供の FSR URL から抽出したベーステンプレート
+    // {page} をページ番号に置換して使う
+    fsrUrls: {
+      maniax: {
+        all:  'https://www.dlsite.com/maniax/fsr/=/language/jp/sex_category[0]/male/ana_flg/all/age_category[0]/general/age_category[1]/r15/age_category[2]/adult/order/trend/options[0]/JPN/options[1]/ENG/options[2]/CHI/options[3]/KO_KR/options[4]/SPA/options[5]/GER/options[6]/FRE/options[7]/IND/options[8]/ITA/options[9]/POR/options[10]/SWE/options[11]/THA/options[12]/VIE/options[13]/OTL/options[14]/NM/per_page/100/page/{page}/show_type/3',
+        sale: 'https://www.dlsite.com/maniax/fsr/=/language/jp/sex_category[0]/male/ana_flg/all/age_category[0]/general/age_category[1]/r15/age_category[2]/adult/order/trend/options[0]/JPN/options[1]/ENG/options[2]/CHI/options[3]/CHI_HANS/options[4]/CHI_HANT/options[5]/KO_KR/options[6]/SPA/options[7]/GER/options[8]/FRE/options[9]/IND/options[10]/ITA/options[11]/POR/options[12]/SWE/options[13]/THA/options[14]/VIE/options[15]/OTL/options[16]/NM/per_page/100/page/{page}/campaign/campaign/show_type/3',
+      },
+      girls: {
+        all:  'https://www.dlsite.com/girls/fsr/=/language/jp/sex_category[0]/female/sex_category[1]/gay/ana_flg/all/work_category[0]/doujin/work_category[1]/books/work_category[2]/drama/work_category[3]/pc/order/trend/options[0]/JPN/options[1]/ENG/options[2]/CHI_HANS/options[3]/CHI_HANT/options[4]/KO_KR/options[5]/SPA/options[6]/ARA/options[7]/GER/options[8]/FRE/options[9]/IND/options[10]/ITA/options[11]/POR/options[12]/SWE/options[13]/THA/options[14]/VIE/options[15]/OTL/options[16]/NM/per_page/100/page/{page}/is_tl/1/is_bl/1/is_gay/1/show_type/1',
+        sale: 'https://www.dlsite.com/girls/fsr/=/language/jp/sex_category[0]/female/sex_category[1]/gay/ana_flg/all/work_category[0]/doujin/work_category[1]/books/work_category[2]/drama/work_category[3]/pc/order/trend/options[0]/JPN/options[1]/ENG/options[2]/CHI_HANS/options[3]/CHI_HANT/options[4]/KO_KR/options[5]/SPA/options[6]/GER/options[7]/FRE/options[8]/IND/options[9]/ITA/options[10]/POR/options[11]/SWE/options[12]/THA/options[13]/VIE/options[14]/OTL/options[15]/NM/per_page/100/page/{page}/campaign/campaign/is_tl/1/is_bl/1/is_gay[0]/1/show_type/1',
+      },
+    },
+
+    // 通常discoveryのページ数（FSRとは別）
     // non-adult works can be on "home", adult on "maniax"
-    sites: ['maniax', 'home'],
+    sites_legacy: ['maniax', 'home'],
     baseUrl: 'https://www.dlsite.com',
     // pages per discovery run per source
     discoveryPages: {
