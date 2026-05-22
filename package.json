@@ -29,6 +29,7 @@
     },
     "files": [
       "electron-main.js",
+      "preload.js",
       "main.js",
       "config.js",
       "crawler/**",

@@ -2,71 +2,139 @@
 
 /**
  * electron-main.js
- * Electron main process.
+ * Electron メインプロセス。
  *
- * 起動フロー:
- *   1. DB init + HTTP APIサーバー起動
- *   2. BrowserWindow でダッシュボードを開く
- *   3. クローラースケジューラー起動
- *   4. システムトレイに常駐
- *
- * ウィンドウを閉じてもトレイに残り、クローラーは継続動作する。
- * トレイアイコン右クリック → 終了 で完全終了。
+ * 制御フロー:
+ *   HTTP API (port 7777) ← web UI のボタン
+ *   IPC (ipcMain)        ← renderer からの直接呼び出し（HTTP不要）
+ *   Tray menu            ← OS ネイティブのトレイ操作
+ *   App menu             ← ウィンドウ上部のメニューバー
  */
 
-const { app, BrowserWindow, Tray, Menu, nativeImage, shell } = require('electron');
-const path = require('path');
+const {
+  app, BrowserWindow, Tray, Menu, nativeImage,
+  shell, ipcMain, dialog,
+} = require('electron');
 
-// ─── backend ─────────────────────────────────────────────────────────────────
+// ─── backend ──────────────────────────────────────────────────────────────────
 
-let _backendReady = false;
+let db, apiServer, scheduler, discovery, detailFetcher;
 
 async function startBackend() {
-  const db        = require('./crawler/db');
-  const apiServer = require('./crawler/apiServer');
-  const scheduler = require('./crawler/scheduler');
+  db            = require('./crawler/db');
+  apiServer     = require('./crawler/apiServer');
+  scheduler     = require('./crawler/scheduler');
+  discovery     = require('./crawler/discovery');
+  detailFetcher = require('./crawler/detailFetcher');
 
   await db.init();
   apiServer.start();
+  await new Promise(r => setTimeout(r, 400));
 
-  // Give the HTTP server 300ms to bind before loading the window
-  await new Promise(r => setTimeout(r, 300));
-  _backendReady = true;
+  scheduler.start().catch(err =>
+    console.error('[electron] scheduler error', err.message)
+  );
+}
 
-  // Start crawler in background (non-blocking)
-  scheduler.start().catch(err => {
-    console.error('[electron] scheduler error', err.message);
+// ─── IPC: renderer → main ──────────────────────────────────────────────────
+
+// 重複実行防止
+const _running = {};
+
+function _bindIpc() {
+  // ステータス取得
+  ipcMain.handle('crawler:status', () => {
+    try {
+      return { ok: true, stats: db.getStats(), running: { ..._running } };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  // 各ジョブ実行
+  ipcMain.handle('crawler:run', async (_, job) => {
+    if (_running[job]) return { ok: false, message: `${job} is already running` };
+    _running[job] = true;
+
+    // レスポンスをすぐ返してバックグラウンドで実行
+    setImmediate(async () => {
+      try {
+        await _execJob(job);
+      } catch (err) {
+        console.error('[electron] job error', job, err.message);
+      } finally {
+        _running[job] = false;
+        // 完了をウィンドウに通知
+        if (_win && !_win.isDestroyed()) {
+          _win.webContents.send('crawler:done', { job, stats: db.getStats() });
+        }
+      }
+    });
+
+    return { ok: true, message: `${job} started` };
   });
 }
 
-// ─── window ──────────────────────────────────────────────────────────────────
+async function _execJob(job) {
+  const log = require('./crawler/logger');
+  log.info('[electron] job start', job);
+  if (job === 'discover') {
+    await discovery.runDiscovery();
+  } else if (job === 'fetch') {
+    await detailFetcher.runDetailFetch(300);
+  } else if (job === 'saleboost') {
+    const circles = db.getCirclesOnSale();
+    db.transaction(() => {
+      for (const { maker_id } of circles) {
+        db.boostCircleWorks(maker_id, 100, 7200);
+      }
+    });
+    db.syncCircleWorksCounts();
+  } else if (job === 'all') {
+    await discovery.runDiscovery();
+    await detailFetcher.runDetailFetch(300);
+    const circles = db.getCirclesOnSale();
+    db.transaction(() => {
+      for (const { maker_id } of circles) {
+        db.boostCircleWorks(maker_id, 100, 7200);
+      }
+    });
+  } else if (job === 'fullscan') {
+    await discovery.runFullScan({ sale: false, maxPages: 0 });
+  } else if (job === 'fullscan_sale') {
+    await discovery.runFullScan({ sale: true, maxPages: 0 });
+  }
+}
+
+// ─── window ───────────────────────────────────────────────────────────────────
 
 let _win  = null;
 let _tray = null;
 
 function createWindow() {
   _win = new BrowserWindow({
-    width:  1280,
-    height: 820,
+    width:     1280,
+    height:    820,
     minWidth:  900,
     minHeight: 600,
-    title: 'DLsite Price Tracker',
+    title:     'DLsite Price Tracker',
     backgroundColor: '#f0f2f5',
-    show: false,
-    autoHideMenuBar: true,
+    show:            false,
+    autoHideMenuBar: false,
     webPreferences: {
-      nodeIntegration: false,
+      nodeIntegration:  false,
       contextIsolation: true,
+      preload: require('path').join(__dirname, 'preload.js'),
     },
   });
 
+  // Electron ネイティブメニューバー
+  _win.setMenu(_buildAppMenu());
+
   _win.loadURL('http://127.0.0.1:7777');
 
-  _win.once('ready-to-show', () => {
-    _win.show();
-  });
+  _win.once('ready-to-show', () => _win.show());
 
-  // ウィンドウを閉じてもトレイに残す（クローラーは継続）
   _win.on('close', e => {
     if (!app.isQuiting) {
       e.preventDefault();
@@ -80,80 +148,136 @@ function createWindow() {
   });
 }
 
-function createTray() {
-  // 16x16 PNG を nativeImage で作成（アイコンファイル不要）
-  const icon = _buildTrayIcon();
-  _tray = new Tray(icon);
+// ─── ネイティブメニューバー ────────────────────────────────────────────────────
 
-  const menu = Menu.buildFromTemplate([
+function _buildAppMenu() {
+  const runItem = (label, job, accel) => ({
+    label,
+    accelerator: accel,
+    click: async () => {
+      if (_running[job]) {
+        dialog.showMessageBox(_win, { message: `${label} は実行中です`, type: 'info' });
+        return;
+      }
+      _running[job] = true;
+      _win?.webContents.send('crawler:started', { job });
+      try { await _execJob(job); } finally {
+        _running[job] = false;
+        _win?.webContents.send('crawler:done', { job, stats: db.getStats() });
+      }
+    },
+  });
+
+  return Menu.buildFromTemplate([
+    {
+      label: 'ファイル',
+      submenu: [
+        {
+          label: 'データベースの場所を開く',
+          click: () => shell.showItemInFolder(
+            require('path').resolve(require('./config').db.path)
+          ),
+        },
+        { type: 'separator' },
+        { label: '終了', accelerator: 'Alt+F4', click: () => { app.isQuiting = true; app.quit(); } },
+      ],
+    },
+    {
+      label: '巡回',
+      submenu: [
+        runItem('RJ収集（新着/ランキング/セール）', 'discover',      'Ctrl+1'),
+        runItem('価格更新（未取得・期限切れ）',    'fetch',          'Ctrl+2'),
+        runItem('セール優先（サークル優先度維持）', 'saleboost',      'Ctrl+3'),
+        { type: 'separator' },
+        runItem('全て巡回',                        'all',            'Ctrl+Shift+A'),
+        { type: 'separator' },
+        runItem('全収集（FSR全ページ）',           'fullscan',       'Ctrl+Shift+F'),
+        runItem('全セール収集',                    'fullscan_sale',  'Ctrl+Shift+S'),
+      ],
+    },
+    {
+      label: '表示',
+      submenu: [
+        { role: 'reload',     label: '再読み込み' },
+        { role: 'toggleDevTools', label: '開発者ツール' },
+        { type: 'separator' },
+        { role: 'zoomIn',  label: '拡大' },
+        { role: 'zoomOut', label: '縮小' },
+        { role: 'resetZoom', label: 'ズームリセット' },
+      ],
+    },
+  ]);
+}
+
+// ─── トレイ ───────────────────────────────────────────────────────────────────
+
+function createTray() {
+  _tray = new Tray(_buildTrayIcon());
+
+  const rebuild = () => _tray.setContextMenu(Menu.buildFromTemplate([
     {
       label: 'DLsite Price Tracker を開く',
-      click: () => {
-        if (_win) { _win.show(); _win.focus(); }
-        else createWindow();
-      },
+      click: () => { if (_win) { _win.show(); _win.focus(); } else createWindow(); },
     },
+    { type: 'separator' },
+    { label: 'RJ収集',      click: () => _execJobSafe('discover') },
+    { label: '価格更新',    click: () => _execJobSafe('fetch') },
+    { label: 'セール優先',  click: () => _execJobSafe('saleboost') },
+    { label: '全て巡回',    click: () => _execJobSafe('all') },
+    { type: 'separator' },
+    { label: '全収集（時間がかかります）', click: () => _execJobSafe('fullscan') },
     { type: 'separator' },
     {
       label: 'ブラウザで開く',
       click: () => shell.openExternal('http://127.0.0.1:7777'),
     },
     { type: 'separator' },
-    {
-      label: '終了',
-      click: () => {
-        app.isQuiting = true;
-        app.quit();
-      },
-    },
-  ]);
+    { label: '終了', click: () => { app.isQuiting = true; app.quit(); } },
+  ]));
 
-  _tray.setContextMenu(menu);
+  rebuild();
   _tray.setToolTip('DLsite Price Tracker');
   _tray.on('double-click', () => {
     if (_win) { _win.show(); _win.focus(); }
   });
 }
 
+async function _execJobSafe(job) {
+  if (_running[job]) return;
+  _running[job] = true;
+  _win?.webContents.send('crawler:started', { job });
+  try { await _execJob(job); } catch (err) {
+    console.error('[electron] tray job error', job, err.message);
+  } finally {
+    _running[job] = false;
+    _win?.webContents.send('crawler:done', { job, stats: db?.getStats() });
+  }
+}
+
 // ─── app lifecycle ────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
   await startBackend();
+  _bindIpc();
   createTray();
   createWindow();
 });
 
-app.on('window-all-closed', () => {
-  // macOS ではDockに残す; Windowsはトレイに残す（何もしない）
-});
+app.on('window-all-closed', () => { /* トレイに残す */ });
+app.on('activate', () => { if (_win) _win.show(); });
 
-app.on('activate', () => {
-  // macOS: Dockアイコンクリックでウィンドウを再表示
-  if (_win) _win.show();
-});
-
-// ─── tray icon helper ─────────────────────────────────────────────────────────
+// ─── tray icon ────────────────────────────────────────────────────────────────
 
 function _buildTrayIcon() {
-  // 16x16 RGBA バッファを手書きして nativeImage に変換
-  const size   = 16;
-  const buf    = Buffer.alloc(size * size * 4);
-  const cx     = 7.5;
-  const cy     = 7.5;
-
+  const size = 16, buf = Buffer.alloc(size * size * 4);
+  const cx = 7.5, cy = 7.5;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const idx  = (y * size + x) * 4;
-      const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
-      if (dist < 7) {
-        buf[idx]     = 59;   // R
-        buf[idx + 1] = 130;  // G
-        buf[idx + 2] = 246;  // B
-        buf[idx + 3] = 255;  // A
+      const i = (y * size + x) * 4;
+      if (Math.hypot(x - cx, y - cy) < 7) {
+        buf[i] = 59; buf[i+1] = 130; buf[i+2] = 246; buf[i+3] = 255;
       }
-      // else transparent
     }
   }
-
   return nativeImage.createFromBuffer(buf, { width: size, height: size });
 }
