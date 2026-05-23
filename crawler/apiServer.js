@@ -43,8 +43,10 @@ async function handleRun(job, res) {
 
   try {
     if (job === 'discover') {
+      Object.assign(_progress, { job, page: 0, found: 0, site: 'maniax', startedAt: Math.floor(Date.now()/1000), done: false });
       await runDiscovery();
     } else if (job === 'fetch') {
+      Object.assign(_progress, { job, page: 0, found: 0, site: null, startedAt: Math.floor(Date.now()/1000), done: false });
       await detailFetcher.runDetailFetch(300);
     } else if (job === 'saleboost') {
       const circles = db.getCirclesOnSale();
@@ -66,14 +68,16 @@ async function handleRun(job, res) {
       });
     } else if (job === 'fullscan' || job === 'fullscan_sale') {
       const sale = job === 'fullscan_sale';
+      Object.assign(_progress, { job, page: 0, found: 0, site: null, startedAt: Math.floor(Date.now()/1000), done: false });
       const result = await runFullScan({
         sale,
         maxPages: 0,
-        onProgress: ({ site, page, found, total }) => {
-          log.info('[api] fullScan progress', { site, page, found, total });
-          _fullScanProgress = { site, page, found, total, sale };
+        onProgress: ({ site, page, found: pageFound, total }) => {
+          Object.assign(_progress, { site, page, found: total, totalPages: null });
+          _fullScanProgress = { site, page, found: pageFound, total, sale };
         },
       });
+      Object.assign(_progress, { done: true });
       _fullScanProgress = { done: true, ...result };
       log.info('[api] fullScan done', result);
     }
@@ -81,21 +85,35 @@ async function handleRun(job, res) {
     log.error('[api] run error', job, err.message);
   } finally {
     _jobRunning[job] = false;
+    _progress.done = true;
   }
 }
 
-let _fullScanProgress = null;
+// 進捗状態（全ジョブ共通）
+const _progress = {
+  job:        null,   // 実行中のジョブ名
+  page:       0,      // 現在ページ
+  totalPages: null,   // 推定総ページ数 (null=不明)
+  found:      0,      // 累計発見RJ数
+  site:       null,   // 現在のサイト
+  startedAt:  null,   // 開始Unix秒
+  done:       false,
+};
+let _fullScanProgress = null; // 後方互換
 
-/** GET /api/run/status → 各ジョブの実行中フラグ + fullScan進捗 */
+/** GET /api/run/status → 各ジョブ実行中フラグ + 詳細進捗 */
 function handleRunStatus() {
+  const elapsed = _progress.startedAt
+    ? Math.floor(Date.now() / 1000) - _progress.startedAt
+    : 0;
   return {
-    discover:        _jobRunning.discover,
-    fetch:           _jobRunning.fetch,
-    saleboost:       _jobRunning.saleboost,
-    all:             _jobRunning.discover || _jobRunning.fetch,
-    fullscan:        _jobRunning.fullscan ?? false,
-    fullscan_sale:   _jobRunning.fullscan_sale ?? false,
-    fullScanProgress: _fullScanProgress,
+    discover:      _jobRunning.discover,
+    fetch:         _jobRunning.fetch,
+    saleboost:     _jobRunning.saleboost,
+    all:           _jobRunning.all ?? false,
+    fullscan:      _jobRunning.fullscan ?? false,
+    fullscan_sale: _jobRunning.fullscan_sale ?? false,
+    progress:      { ..._progress, elapsed },
   };
 }
 
@@ -365,6 +383,52 @@ body {
 .filterbar input { width: 220px; }
 .filterbar input:focus { border-color:#0078d7; }
 .filterbar select { font-size:11px; }
+
+/* ── 進捗バー ── */
+.progress-bar-wrap {
+  border-bottom: 1px solid #ccc;
+  background: #f8f8f8;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  gap: 8px;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: height .2s;
+}
+.progress-bar-wrap.hidden { height: 0; border: none; padding: 0; }
+.progress-track {
+  flex: 1;
+  height: 10px;
+  background: #dde;
+  border: 1px solid #aab;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(to right, #0055cc, #0088ff);
+  border-radius: 3px;
+  transition: width .4s;
+  min-width: 4px;
+}
+.progress-fill.indeterminate {
+  width: 30% !important;
+  animation: slide 1.2s ease-in-out infinite;
+}
+@keyframes slide {
+  0%   { margin-left: 0;    }
+  50%  { margin-left: 70%;  }
+  100% { margin-left: 0;    }
+}
+.progress-label {
+  font-size: 10px;
+  color: #555;
+  white-space: nowrap;
+  min-width: 160px;
+  text-align: right;
+}
 
 /* ── メインエリア ── */
 .main-area {
@@ -713,6 +777,14 @@ body {
     <option value="release">リリース日順</option>
     <option value="checked">確認日順</option>
   </select>
+</div>
+
+<!-- 進捗バー -->
+<div class="progress-bar-wrap hidden" id="progressWrap">
+  <div class="progress-track">
+    <div class="progress-fill indeterminate" id="progressFill"></div>
+  </div>
+  <div class="progress-label" id="progressLabel">準備中...</div>
 </div>
 
 <!-- メインエリア -->
@@ -1081,16 +1153,15 @@ async function runJob(job) {
 async function _waitJobDone(job, btn) {
   const checkKey = job === 'all' ? 'discover' : job;
   let tries = 0;
+  showProgress(true);
+
   const id = setInterval(async () => {
     tries++;
     const s = await api('/api/run/status');
     if (!s) return;
 
-    // 全収集の進捗をステータスバーに表示
-    if ((job === 'fullscan' || job === 'fullscan_sale') && s.fullScanProgress && !s.fullScanProgress.done) {
-      const p = s.fullScanProgress;
-      setStatus('全収集中... ' + p.site + ' p.' + p.page + ' (新規:' + p.total + '件)');
-    }
+    const p = s.progress ?? {};
+    updateProgressBar(p, job);
 
     if (!s[checkKey] || tries > 600) {
       clearInterval(id);
@@ -1098,14 +1169,46 @@ async function _waitJobDone(job, btn) {
       btn.title = _JOB_LABELS[job];
       await loadStats();
       await loadWorks(_page);
-      const p = s.fullScanProgress;
-      if (p && p.done) {
-        setStatus('全収集完了 — 新規: ' + (p.grandTotal ?? 0) + ' 件');
+      showProgress(false);
+
+      if (p.done && (job === 'fullscan' || job === 'fullscan_sale')) {
+        setStatus('全収集完了 — 新規: ' + (s.fullScanProgress?.grandTotal ?? p.found ?? 0) + ' 件');
       } else {
         setStatus(_JOB_LABELS[job] + ' 完了');
       }
     }
-  }, 2000);
+  }, 1500);
+}
+
+function showProgress(show) {
+  const wrap = document.getElementById('progressWrap');
+  if (wrap) wrap.classList.toggle('hidden', !show);
+}
+
+function updateProgressBar(p, job) {
+  const fill  = document.getElementById('progressFill');
+  const label = document.getElementById('progressLabel');
+  if (!fill || !label) return;
+
+  const elapsed = p.elapsed ? Math.floor(p.elapsed) + 's' : '';
+
+  if (job === 'fullscan' || job === 'fullscan_sale') {
+    // ページ数が不明なので不定形アニメーション
+    fill.classList.add('indeterminate');
+    const site  = p.site ? '[' + p.site + ']' : '';
+    const page  = p.page ? 'p.' + p.page : '';
+    const found = p.found ? p.found + '件' : '';
+    label.textContent = [site, page, found, elapsed].filter(Boolean).join(' ');
+  } else if (job === 'fetch') {
+    fill.classList.remove('indeterminate');
+    // due worksに対する進捗（近似値）
+    const pct = p.found ? Math.min(99, Math.round(p.found / 3)) : 30;
+    fill.style.width = pct + '%';
+    label.textContent = (p.found || 0) + '件更新 ' + elapsed;
+  } else {
+    fill.classList.add('indeterminate');
+    label.textContent = (_JOB_LABELS[job] ?? job) + '中... ' + elapsed;
+  }
 }
 
 // ── Utils ──────────────────────────────────────────────────────────────────

@@ -109,10 +109,16 @@ async function _fetchWithTimeout(url, opts = {}) {
 
   try {
     const headers = {
-      'User-Agent': config.dlsite.userAgent,
-      'Cookie':     config.dlsite.locale,
-      'Accept-Language': 'ja,en;q=0.9',
-      'Accept':     'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'User-Agent':      config.dlsite.userAgent,
+      'Cookie':          config.dlsite.cookies,
+      'Referer':         'https://www.dlsite.com/',
+      'Accept-Language': 'ja,ja-JP;q=0.9,en;q=0.8',
+      'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection':      'keep-alive',
+      'Sec-Fetch-Dest':  'document',
+      'Sec-Fetch-Mode':  'navigate',
+      'Sec-Fetch-Site':  'same-origin',
       ...opts.headers,
     };
 
