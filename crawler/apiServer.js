@@ -763,7 +763,29 @@ let _charts = {}, _searchTimer = null;
   await loadStats();
   await loadWorks(1);
   setInterval(loadStats, 20000);
+
+  // Electron 起動時: IPC でジョブ完了/開始通知を受け取りUIに反映
+  if (window.electronAPI) {
+    window.electronAPI.onStarted(({ job }) => {
+      setStatus((_JOB_LABELS[job] ?? job) + ' 実行中...');
+      const btn = _jobBtn(job);
+      if (btn) btn.classList.add('running');
+    });
+    window.electronAPI.onDone(({ job }) => {
+      setStatus((_JOB_LABELS[job] ?? job) + ' 完了');
+      const btn = _jobBtn(job);
+      if (btn) btn.classList.remove('running');
+      loadStats();
+      loadWorks(_page);
+    });
+  }
 })();
+
+// job名 → ツールバーボタン要素
+function _jobBtn(job) {
+  const cap = s => s.charAt(0).toUpperCase() + s.replace(/_([a-z])/g, (_, c) => c.toUpperCase()).slice(1);
+  return document.getElementById('btn' + cap(job));
+}
 
 // ── Stats ──────────────────────────────────────────────────────────────────
 async function loadStats() {
