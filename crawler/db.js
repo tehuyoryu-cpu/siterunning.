@@ -2,7 +2,7 @@
 
 /**
  * crawler/db.js
- * SQLite access layer – sql.js (pure WASM, no native binaries).
+ * SQLite access layer â sql.js (pure WASM, no native binaries).
  *
  * External API is identical to the better-sqlite3 version.
  * Internal implementation uses sql.js with manual file persistence.
@@ -12,8 +12,8 @@
  *   On startup, the DB file is loaded from disk if it exists.
  *
  * Initialisation:
- *   await db.init()   – must be called once before any other function.
- *   db.open()         – returns the live Database instance (throws if not ready).
+ *   await db.init()   â must be called once before any other function.
+ *   db.open()         â returns the live Database instance (throws if not ready).
  */
 
 const initSqlJs = require('sql.js');
@@ -24,13 +24,13 @@ const log        = require('./logger');
 
 let _db      = null;   // sql.js Database instance
 let _SQL     = null;   // sql.js namespace
-// electron-builder portable exe では PORTABLE_EXECUTABLE_DIR が exe のディレクトリを指す
+// electron-builder portable exe ã§ã¯ PORTABLE_EXECUTABLE_DIR ã exe ã®ãã£ã¬ã¯ããªãæã
 const _exeDir = process.env.PORTABLE_EXECUTABLE_DIR
   || (process.resourcesPath ? path.join(process.resourcesPath, '..') : null)
   || process.cwd();
 const DB_PATH = path.resolve(_exeDir, config.db.path);
 
-// ─── init / open / close ────────────────────────────────────────────────────
+// âââ init / open / close ââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 /**
  * Async initialisation. Must be awaited once before any DB call.
@@ -42,16 +42,16 @@ async function init() {
   // Locate the WASM file correctly both in dev and inside a pkg exe.
   _SQL = await initSqlJs({
     locateFile: file => {
-      // 1. electron-builder でパッケージされた場合（本番exe）
-      //    extraResources で {resources}/sql-wasm.wasm に配置される
+      // 1. electron-builder ã§ããã±ã¼ã¸ãããå ´åï¼æ¬çªexeï¼
+      //    extraResources ã§ {resources}/sql-wasm.wasm ã«éç½®ããã
       if (process.resourcesPath) {
         return path.join(process.resourcesPath, file);
       }
-      // 2. pkg でパッケージされた場合
+      // 2. pkg ã§ããã±ã¼ã¸ãããå ´å
       if (process.pkg) {
         return path.join(path.dirname(process.execPath), file);
       }
-      // 3. 開発環境
+      // 3. éçºç°å¢
       return path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', file);
     },
   });
@@ -71,7 +71,7 @@ async function init() {
 
 /** Returns the live sql.js Database. Throws if init() was not awaited. */
 function open() {
-  if (!_db) throw new Error('[db] not initialised – await db.init() first');
+  if (!_db) throw new Error('[db] not initialised â await db.init() first');
   return _db;
 }
 
@@ -84,7 +84,7 @@ function close() {
   }
 }
 
-// ─── schema ─────────────────────────────────────────────────────────────────
+// âââ schema âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 function _applySchema() {
   _db.run(`
@@ -106,7 +106,7 @@ function _applySchema() {
       consecutive_errors    INTEGER DEFAULT 0
     );
 
-    -- forward-only migration: 既存テーブルへのカラム追加
+    -- forward-only migration: æ¢å­ãã¼ãã«ã¸ã®ã«ã©ã è¿½å 
     CREATE TABLE IF NOT EXISTS _migrations (id TEXT PRIMARY KEY);
 
     CREATE TABLE IF NOT EXISTS price_history (
@@ -133,7 +133,7 @@ function _applySchema() {
     CREATE INDEX IF NOT EXISTS idx_works_maker ON works(maker_id);
   `);
 
-  // 既存DBへの安全なカラム追加 (IF NOT EXISTS は使えないのでtry/catch)
+  // æ¢å­DBã¸ã®å®å¨ãªã«ã©ã è¿½å  (IF NOT EXISTS ã¯ä½¿ããªãã®ã§try/catch)
   const migrations = [
     'ALTER TABLE works ADD COLUMN consecutive_errors INTEGER DEFAULT 0',
   ];
@@ -143,7 +143,7 @@ function _applySchema() {
   }
 }
 
-// ─── low-level query helpers ─────────────────────────────────────────────────
+// âââ low-level query helpers âââââââââââââââââââââââââââââââââââââââââââââââââ
 
 /**
  * Execute a SELECT and return the first row as a plain object, or null.
@@ -174,26 +174,26 @@ function _all(sql, params = []) {
  * Execute an INSERT / UPDATE / DELETE, then persist to disk.
  */
 /**
- * 単発ミューテーション（即時保存）。
- * バッチ処理には runInTransaction() を使うこと。
+ * åçºãã¥ã¼ãã¼ã·ã§ã³ï¼å³æä¿å­ï¼ã
+ * ãããå¦çã«ã¯ runInTransaction() ãä½¿ããã¨ã
  */
 function _run(sql, params = []) {
   const stmt = _db.prepare(sql);
   stmt.bind(params);
   stmt.step();
   stmt.free();
-  // _save() は呼ばない: transaction() または明示的 save() で制御
+  // _save() ã¯å¼ã°ãªã: transaction() ã¾ãã¯æç¤ºç save() ã§å¶å¾¡
 }
 
-/** 複数の _run をひとまとめにして最後に1回だけ保存。 */
+/** è¤æ°ã® _run ãã²ã¨ã¾ã¨ãã«ãã¦æå¾ã«1åã ãä¿å­ã */
 function transaction(fn) {
   fn();
   _save();
 }
 
 /**
- * 複数ミューテーションをトランザクションでラップし最後に1回だけ保存。
- * @param {Function} fn  db操作を行う同期関数
+ * è¤æ°ãã¥ã¼ãã¼ã·ã§ã³ããã©ã³ã¶ã¯ã·ã§ã³ã§ã©ãããæå¾ã«1åã ãä¿å­ã
+ * @param {Function} fn  dbæä½ãè¡ãåæé¢æ°
  */
 function runInTransaction(fn) {
   _db.run('BEGIN');
@@ -204,12 +204,12 @@ function runInTransaction(fn) {
     _db.run('ROLLBACK');
     throw err;
   }
-  _save();   // ← 1回だけ
+  _save();   // â 1åã ã
 }
 
 /**
- * トランザクション内用: 保存なしで実行。
- * runInTransaction() のコールバック内でのみ使う。
+ * ãã©ã³ã¶ã¯ã·ã§ã³åç¨: ä¿å­ãªãã§å®è¡ã
+ * runInTransaction() ã®ã³ã¼ã«ããã¯åã§ã®ã¿ä½¿ãã
  */
 function _runNoSave(sql, params = []) {
   const stmt = _db.prepare(sql);
@@ -224,7 +224,7 @@ function _save() {
   fs.writeFileSync(DB_PATH, Buffer.from(data));
 }
 
-// ─── works ──────────────────────────────────────────────────────────────────
+// âââ works ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 function upsertWork(w) {
   _run(`
@@ -267,12 +267,12 @@ function markChecked(rjCode, fields) {
   ]);
 }
 
-/** A: フェッチエラー記録。連続エラー数に応じてintervalを延ばす。 */
+/** A: ãã§ããã¨ã©ã¼è¨é²ãé£ç¶ã¨ã©ã¼æ°ã«å¿ãã¦intervalãå»¶ã°ãã */
 function recordFetchError(rjCode) {
   const w = getWorkByRj(rjCode);
   if (!w) return;
   const errs = (w.consecutive_errors ?? 0) + 1;
-  // 5回連続エラー→72h, 10回→7日 でほぼ停止
+  // 5åé£ç¶ã¨ã©ã¼â72h, 10åâ7æ¥ ã§ã»ã¼åæ­¢
   const interval = errs >= 10 ? 7 * 86400
                  : errs >=  5 ? 3 * 86400
                  : w.check_interval ?? 86400;
@@ -313,7 +313,7 @@ function boostCircleWorks(makerId, priority, checkInterval) {
   `, [priority, checkInterval, makerId]);
 }
 
-/** ② セール終了: サークル全作品の優先度と間隔を通常値に戻す */
+/** â¡ ã»ã¼ã«çµäº: ãµã¼ã¯ã«å¨ä½åã®åªååº¦ã¨ééãéå¸¸å¤ã«æ»ã */
 function resetCircleWorksPriority(makerId, priority, checkInterval) {
   _run(`
     UPDATE works
@@ -322,7 +322,7 @@ function resetCircleWorksPriority(makerId, priority, checkInterval) {
   `, [priority, checkInterval, makerId]);
 }
 
-// ─── price_history ──────────────────────────────────────────────────────────
+// âââ price_history ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 function getLatestPrice(rjCode) {
   return _get(`
@@ -372,7 +372,7 @@ function getPriceHistory(rjCode) {
   );
 }
 
-// ─── circles ────────────────────────────────────────────────────────────────
+// âââ circles ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 function upsertCircle(makerId, circleName) {
   _run(`
@@ -383,7 +383,7 @@ function upsertCircle(makerId, circleName) {
   `, [makerId, circleName]);
 }
 
-/** works テーブルのmaker_id別件数でcirclesを同期（正確なworks_count） */
+/** works ãã¼ãã«ã®maker_idå¥ä»¶æ°ã§circlesãåæï¼æ­£ç¢ºãªworks_countï¼ */
 function syncCircleWorksCounts() {
   _run(`
     UPDATE circles SET works_count = (
@@ -393,7 +393,7 @@ function syncCircleWorksCounts() {
   _save();
 }
 
-/** ① scheduler用: on_sale=1 のサークル一覧を返す（sql.js対応） */
+/** â  schedulerç¨: on_sale=1 ã®ãµã¼ã¯ã«ä¸è¦§ãè¿ãï¼sql.jså¯¾å¿ï¼ */
 function getCirclesOnSale() {
   return _all('SELECT maker_id FROM circles WHERE on_sale = 1');
 }
@@ -411,7 +411,7 @@ function getCircle(makerId) {
   return _get('SELECT * FROM circles WHERE maker_id = ?', [makerId]);
 }
 
-// ─── stats ──────────────────────────────────────────────────────────────────
+// âââ stats ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 function getStats() {
   return {
@@ -426,7 +426,7 @@ function getStats() {
   };
 }
 
-// ─── backup ──────────────────────────────────────────────────────────────────
+// âââ backup ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 /**
  * Save a timestamped copy of the DB file to ./backups/.
@@ -458,14 +458,13 @@ function backup() {
   }
 }
 
-// ─── export (for CSV/JSON API) ───────────────────────────────────────────────
+// âââ export (for CSV/JSON API) âââââââââââââââââââââââââââââââââââââââââââââââ
 
 /**
  * Export all price_history rows joined with work metadata.
  * Returns an array of plain objects.
  */
 function exportAllHistory() {
-  const db = open();
   return _all(`
     SELECT
       w.rj_code, w.title, w.circle, w.maker_id, w.work_type,
@@ -477,7 +476,7 @@ function exportAllHistory() {
   `);
 }
 
-// ─── UI query helpers ─────────────────────────────────────────────────────────
+// âââ UI query helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 /**
  * Paginated works list with latest price joined.
@@ -504,16 +503,16 @@ function searchWorks({ q = '', sort = 'priority', onSale = false, page = 1, limi
     params.push(like, like, like);
   }
 
-  // latest_price を WITH句で事前集計し コリレートサブクエリを排除
+  // latest_price ã WITHå¥ã§äºåéè¨ã ã³ãªã¬ã¼ããµãã¯ã¨ãªãæé¤
   const baseSql = `
     WITH latest_price AS (
       SELECT rj_code,
-             MAX(checked_at) AS max_at
+             MAX(id) AS max_id
       FROM price_history GROUP BY rj_code
     )
     FROM works w
     LEFT JOIN latest_price lp ON lp.rj_code = w.rj_code
-    LEFT JOIN price_history ph ON ph.rj_code = lp.rj_code AND ph.checked_at = lp.max_at
+    LEFT JOIN price_history ph ON ph.id = lp.max_id
     WHERE 1=1 ${where}
   `;
 
@@ -551,12 +550,12 @@ function unixNow() {
   return Math.floor(Date.now() / 1000);
 }
 
-/** セール中サークル一覧を返す（scheduler用） */
+/** ã»ã¼ã«ä¸­ãµã¼ã¯ã«ä¸è¦§ãè¿ãï¼schedulerç¨ï¼ */
 function getCirclesOnSale() {
   return _all('SELECT maker_id FROM circles WHERE on_sale = 1');
 }
 
-/** 全RJコードをSetで返す（discovery高速照合用） */
+/** å¨RJã³ã¼ããSetã§è¿ãï¼discoveryé«éç§åç¨ï¼ */
 function getAllRjCodes() {
   return new Set(_all('SELECT rj_code FROM works').map(r => r.rj_code));
 }
