@@ -33,7 +33,7 @@ module.exports = {
     recentWork:12 * 60 * 60,   // 12h (released < 30 days)
     popular:   12 * 60 * 60,   // 12h (dl_count > 1000)
     normal:    24 * 60 * 60,   // 24h
-    cold:      72 * 60 * 60,   // 72h (≥5 checks with no price change)
+    cold:      72 * 60 * 60,   // 72h (â¥5 checks with no price change)
   },
 
   // higher = checked first
@@ -53,10 +53,10 @@ module.exports = {
   },
 
   dlsite: {
-    sites: ['maniax', 'girls'],
+    sites: ['maniax'],
 
-    // ユーザー提供の FSR URL から抽出したベーステンプレート
-    // {page} をページ番号に置換して使う
+    // ã¦ã¼ã¶ã¼æä¾ã® FSR URL ããæ½åºãããã¼ã¹ãã³ãã¬ã¼ã
+    // {page} ããã¼ã¸çªå·ã«ç½®æãã¦ä½¿ã
     fsrUrls: {
       maniax: {
         all:  'https://www.dlsite.com/maniax/fsr/=/language/jp/sex_category%5B0%5D/male/ana_flg/all/age_category%5B0%5D/general/age_category%5B1%5D/r15/age_category%5B2%5D/adult/order/trend/options%5B0%5D/JPN/options%5B1%5D/ENG/options%5B2%5D/CHI/options%5B3%5D/CHI_HANS/options%5B4%5D/CHI_HANT/options%5B5%5D/KO_KR/options%5B6%5D/SPA/options%5B7%5D/GER/options%5B8%5D/FRE/options%5B9%5D/IND/options%5B10%5D/ITA/options%5B11%5D/POR/options%5B12%5D/SWE/options%5B13%5D/THA/options%5B14%5D/VIE/options%5B15%5D/OTL/options%5B16%5D/NM/per_page/100/page/{page}/show_type/3',
@@ -68,7 +68,7 @@ module.exports = {
       },
     },
 
-    // 通常discoveryのページ数（FSRとは別）
+    // éå¸¸discoveryã®ãã¼ã¸æ°ï¼FSRã¨ã¯å¥ï¼
     // non-adult works can be on "home", adult on "maniax"
     sites_legacy: ['maniax', 'home'],
     baseUrl: 'https://www.dlsite.com',
@@ -82,10 +82,10 @@ module.exports = {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
       'AppleWebKit/537.36 (KHTML, like Gecko) ' +
       'Chrome/124.0.0.0 Safari/537.36',
-    // DLsite に必要な Cookie:
-    //   locale       = 日本語表示・JPY価格
-    //   adultchecked = 年齢確認通過済み
-    //   agecheck     = 旧形式の年齢確認フラグ
+    // DLsite ã«å¿è¦ãª Cookie:
+    //   locale       = æ¥æ¬èªè¡¨ç¤ºã»JPYä¾¡æ ¼
+    //   adultchecked = å¹´é½¢ç¢ºèªééæ¸ã¿
+    //   agecheck     = æ§å½¢å¼ã®å¹´é½¢ç¢ºèªãã©ã°
     cookies: 'locale=ja-jp; adultchecked=1; agecheck=1',
   },
 };
