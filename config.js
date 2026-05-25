@@ -33,7 +33,7 @@ module.exports = {
     recentWork:12 * 60 * 60,   // 12h (released < 30 days)
     popular:   12 * 60 * 60,   // 12h (dl_count > 1000)
     normal:    24 * 60 * 60,   // 24h
-    cold:      72 * 60 * 60,   // 72h (â¥5 checks with no price change)
+    cold:      72 * 60 * 60,   // 72h (Ã¢ÂÂ¥5 checks with no price change)
   },
 
   // higher = checked first
@@ -55,20 +55,20 @@ module.exports = {
   dlsite: {
     sites: ['maniax'],
 
-    // ã¦ã¼ã¶ã¼æä¾ã® FSR URL ããæ½åºãããã¼ã¹ãã³ãã¬ã¼ã
-    // {page} ããã¼ã¸çªå·ã«ç½®æãã¦ä½¿ã
+    // Ã£ÂÂ¦Ã£ÂÂ¼Ã£ÂÂ¶Ã£ÂÂ¼Ã¦ÂÂÃ¤Â¾ÂÃ£ÂÂ® FSR URL Ã£ÂÂÃ£ÂÂÃ¦ÂÂ½Ã¥ÂÂºÃ£ÂÂÃ£ÂÂÃ£ÂÂÃ£ÂÂ¼Ã£ÂÂ¹Ã£ÂÂÃ£ÂÂ³Ã£ÂÂÃ£ÂÂ¬Ã£ÂÂ¼Ã£ÂÂ
+    // {page} Ã£ÂÂÃ£ÂÂÃ£ÂÂ¼Ã£ÂÂ¸Ã§ÂÂªÃ¥ÂÂ·Ã£ÂÂ«Ã§Â½Â®Ã¦ÂÂÃ£ÂÂÃ£ÂÂ¦Ã¤Â½Â¿Ã£ÂÂ
     fsrUrls: {
       maniax: {
         all:  'https://www.dlsite.com/maniax/fsr/=/language/jp/sex_category%5B0%5D/male/ana_flg/all/age_category%5B0%5D/general/age_category%5B1%5D/r15/age_category%5B2%5D/adult/order/trend/options%5B0%5D/JPN/options%5B1%5D/ENG/options%5B2%5D/CHI/options%5B3%5D/CHI_HANS/options%5B4%5D/CHI_HANT/options%5B5%5D/KO_KR/options%5B6%5D/SPA/options%5B7%5D/GER/options%5B8%5D/FRE/options%5B9%5D/IND/options%5B10%5D/ITA/options%5B11%5D/POR/options%5B12%5D/SWE/options%5B13%5D/THA/options%5B14%5D/VIE/options%5B15%5D/OTL/options%5B16%5D/NM/per_page/100/page/{page}/show_type/3',
         sale: 'https://www.dlsite.com/maniax/fsr/=/language/jp/sex_category%5B0%5D/male/ana_flg/all/age_category%5B0%5D/general/age_category%5B1%5D/r15/age_category%5B2%5D/adult/order/trend/options%5B0%5D/JPN/options%5B1%5D/ENG/options%5B2%5D/CHI/options%5B3%5D/CHI_HANS/options%5B4%5D/CHI_HANT/options%5B5%5D/KO_KR/options%5B6%5D/SPA/options%5B7%5D/GER/options%5B8%5D/FRE/options%5B9%5D/IND/options%5B10%5D/ITA/options%5B11%5D/POR/options%5B12%5D/SWE/options%5B13%5D/THA/options%5B14%5D/VIE/options%5B15%5D/OTL/options%5B16%5D/NM/per_page/100/page/{page}/campaign/campaign/show_type/3',
       },
       girls: {
-        all:  'https://www.dlsite.com/girls/fsr/=/language/jp/sex_category[0]/female/sex_category[1]/gay/ana_flg/all/work_category[0]/doujin/work_category[1]/books/work_category[2]/drama/work_category[3]/pc/order/trend/options[0]/JPN/options[1]/ENG/options[2]/CHI_HANS/options[3]/CHI_HANT/options[4]/KO_KR/options[5]/SPA/options[6]/ARA/options[7]/GER/options[8]/FRE/options[9]/IND/options[10]/ITA/options[11]/POR/options[12]/SWE/options[13]/THA/options[14]/VIE/options[15]/OTL/options[16]/NM/per_page/100/page/{page}/is_tl/1/is_bl/1/is_gay/1/show_type/1',
+        all:  'https://www.dlsite.com/girls/fsr/=/language/jp/sex_category%5B0%5D/female/sex_category%5B1%5D/gay/ana_flg/all/work_category%5B0%5D/doujin/work_category%5B1%5D/books/work_category%5B2%5D/drama/work_category%5B3%5D/pc/order/trend/options%5B0%5D/JPN/options%5B1%5D/ENG/options%5B2%5D/CHI_HANS/options%5B3%5D/CHI_HANT/options%5B4%5D/KO_KR/options%5B5%5D/SPA/options%5B6%5D/ARA/options%5B7%5D/GER/options%5B8%5D/FRE/options%5B9%5D/IND/options%5B10%5D/ITA/options%5B11%5D/POR/options%5B12%5D/SWE/options%5B13%5D/THA/options%5B14%5D/VIE/options%5B15%5D/OTL/options%5B16%5D/NM/per_page/100/page/{page}/is_tl/1/is_bl/1/is_gay/1/show_type/1',
         sale: 'https://www.dlsite.com/girls/fsr/=/language/jp/sex_category[0]/female/sex_category[1]/gay/ana_flg/all/work_category[0]/doujin/work_category[1]/books/work_category[2]/drama/work_category[3]/pc/order/trend/options[0]/JPN/options[1]/ENG/options[2]/CHI_HANS/options[3]/CHI_HANT/options[4]/KO_KR/options[5]/SPA/options[6]/GER/options[7]/FRE/options[8]/IND/options[9]/ITA/options[10]/POR/options[11]/SWE/options[12]/THA/options[13]/VIE/options[14]/OTL/options[15]/NM/per_page/100/page/{page}/campaign/campaign/is_tl/1/is_bl/1/is_gay[0]/1/show_type/1',
       },
     },
 
-    // éå¸¸discoveryã®ãã¼ã¸æ°ï¼FSRã¨ã¯å¥ï¼
+    // Ã©ÂÂÃ¥Â¸Â¸discoveryÃ£ÂÂ®Ã£ÂÂÃ£ÂÂ¼Ã£ÂÂ¸Ã¦ÂÂ°Ã¯Â¼ÂFSRÃ£ÂÂ¨Ã£ÂÂ¯Ã¥ÂÂ¥Ã¯Â¼Â
     // non-adult works can be on "home", adult on "maniax"
     sites_legacy: ['maniax', 'home'],
     baseUrl: 'https://www.dlsite.com',
@@ -82,10 +82,10 @@ module.exports = {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
       'AppleWebKit/537.36 (KHTML, like Gecko) ' +
       'Chrome/124.0.0.0 Safari/537.36',
-    // DLsite ã«å¿è¦ãª Cookie:
-    //   locale       = æ¥æ¬èªè¡¨ç¤ºã»JPYä¾¡æ ¼
-    //   adultchecked = å¹´é½¢ç¢ºèªééæ¸ã¿
-    //   agecheck     = æ§å½¢å¼ã®å¹´é½¢ç¢ºèªãã©ã°
+    // DLsite Ã£ÂÂ«Ã¥Â¿ÂÃ¨Â¦ÂÃ£ÂÂª Cookie:
+    //   locale       = Ã¦ÂÂ¥Ã¦ÂÂ¬Ã¨ÂªÂÃ¨Â¡Â¨Ã§Â¤ÂºÃ£ÂÂ»JPYÃ¤Â¾Â¡Ã¦Â Â¼
+    //   adultchecked = Ã¥Â¹Â´Ã©Â½Â¢Ã§Â¢ÂºÃ¨ÂªÂÃ©ÂÂÃ©ÂÂÃ¦Â¸ÂÃ£ÂÂ¿
+    //   agecheck     = Ã¦ÂÂ§Ã¥Â½Â¢Ã¥Â¼ÂÃ£ÂÂ®Ã¥Â¹Â´Ã©Â½Â¢Ã§Â¢ÂºÃ¨ÂªÂÃ£ÂÂÃ£ÂÂ©Ã£ÂÂ°
     cookies: 'locale=ja-jp; adultchecked=1; agecheck=1',
   },
 };
