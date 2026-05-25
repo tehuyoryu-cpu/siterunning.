@@ -20,6 +20,23 @@ const {
 
 let db, apiServer, scheduler, discovery, detailFetcher;
 
+
+// Preventive: load DLsite in a hidden Chromium window to obtain real session cookies
+// (CF clearance, age-check) before the crawler starts.
+async function warmUpSession() {
+  return new Promise(resolve => {
+    const { BrowserWindow } = require('electron');
+    const w = new BrowserWindow({
+      show: false,
+      webPreferences: { nodeIntegration: false, contextIsolation: true },
+    });
+    const done = () => { try { w.destroy(); } catch {} resolve(); };
+    w.loadURL('https://www.dlsite.com/');
+    w.webContents.once('did-finish-load', () => setTimeout(done, 1500));
+    w.webContents.once('did-fail-load',   done);
+    setTimeout(done, 20000);
+  });
+}
 async function startBackend() {
   db            = require('./crawler/db');
   apiServer     = require('./crawler/apiServer');
@@ -28,9 +45,26 @@ async function startBackend() {
   detailFetcher = require('./crawler/detailFetcher');
 
   await db.init();
+
+  // Inject DLsite cookies into Chromium session so net.fetch sends them automatically.
+  try {
+    const { session } = require('electron');
+    const ses = session.defaultSession;
+    const dlUrl = 'https://www.dlsite.com';
+    for (const [name, value] of [
+      ['locale', 'ja-jp'],
+      ['adultchecked', '1'],
+      ['agecheck', '1'],
+    ]) {
+      await ses.cookies.set({ url: dlUrl, name, value, domain: '.dlsite.com', path: '/' })
+        .catch(e => console.warn('[cookie]', name, e.message));
+    }
+  } catch(e) { console.warn('[cookie] session not ready', e.message); }
+
   apiServer.start();
   await new Promise(r => setTimeout(r, 400));
 
+  await warmUpSession(); // load DLsite in hidden window for CF session
   scheduler.start().catch(err =>
     console.error('[electron] scheduler error', err.message)
   );
