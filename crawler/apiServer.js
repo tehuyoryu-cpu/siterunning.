@@ -50,10 +50,13 @@ async function handleRun(job, res) {
       Object.assign(_progress, { job, page: 0, found: 0, site: 'maniax', startedAt: Math.floor(Date.now()/1000), done: false });
       const r = await runDiscovery();
       _lastResult[job] = { ok: true, discovered: r?.discovered ?? 0, finishedAt: Date.now() };
+      _sseSend('log', `discovery完了 — 新規: ${r?.discovered ?? 0}件`);
     } else if (job === 'fetch') {
       Object.assign(_progress, { job, page: 0, found: 0, site: null, startedAt: Math.floor(Date.now()/1000), done: false });
       const r = await detailFetcher.runDetailFetch(300);
       _lastResult[job] = { ok: true, ...r, finishedAt: Date.now() };
+      _sseSend(r?.priceChanges > 0 ? 'change' : 'log',
+        `価格更新完了 — 処理:${r?.processed ?? 0}件 変動:${r?.priceChanges ?? 0}件`);
     } else if (job === 'saleboost') {
       const circles = db.getCirclesOnSale();
       db.transaction(() => {
@@ -96,6 +99,29 @@ async function handleRun(job, res) {
   }
 }
 
+// ─── SSE ブロードキャスト ────────────────────────────────────────────────────
+const _sseClients = new Set();
+
+function _sseSend(event, data) {
+  const msg = `event: ${event}
+data: ${typeof data === 'string' ? data : JSON.stringify(data)}
+
+`;
+  for (const res of _sseClients) {
+    try { res.write(msg); } catch { _sseClients.delete(res); }
+  }
+}
+
+// logger の warn/error を SSE にも流す
+const _origWarn  = log.warn.bind(log);
+const _origError = log.error.bind(log);
+// monkey-patch（起動後に有効になる）
+setTimeout(() => {
+  const origInfo  = log.info.bind(log);
+  log.warn  = (...a) => { _origWarn(...a);  _sseSend('warn',  a.join(' ')); };
+  log.error = (...a) => { _origError(...a); _sseSend('error', a.join(' ')); };
+}, 0);
+
 // 進捗状態（全ジョブ共通）
 const _progress = {
   job:        null,   // 実行中のジョブ名
@@ -123,6 +149,7 @@ function handleRunStatus() {
     progress:      { ..._progress, elapsed },
     lastResult:    _lastResult,
     recentErrors:  log.getRecentErrors().slice(-10),
+    sseClients:    _sseClients.size,
   };
 }
 
@@ -222,6 +249,21 @@ function createServer() {
         }
         handleRun(runMatch[1], res);  // レスポンスは関数内で返す
         return;
+      }
+
+      // SSE: リアルタイムログストリーム
+      if (pathname === '/api/log-stream') {
+        res.writeHead(200, {
+          'Content-Type':  'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          'Connection':    'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
+        res.write('retry: 3000\n\n');
+        res.write(`event: log\ndata: SSE connected\n\n`);
+        _sseClients.add(res);
+        req.on('close', () => _sseClients.delete(res));
+        return; // keep-alive, don't end()
       }
 
       if (pathname === '/api/log') {
@@ -752,6 +794,55 @@ body {
 }
 .sb-panel:last-child { border-right: none; flex:1; }
 .sb-sale { color: #cc0000; font-weight:bold; }
+
+/* ── 走査進捗パネル（progress.htmlから） ── */
+.scan-panel {
+  display: none;
+  border-top: 1px solid #ccc;
+  background: #fff;
+  padding: 10px 14px;
+  flex-shrink: 0;
+}
+.scan-panel.active { display: block; }
+.scan-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.scan-stat {
+  background: #f8f8f8;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.scan-stat-label { font-size: 10px; color: #999; margin-bottom: 2px; }
+.scan-stat-value { font-size: 18px; font-weight: 700; color: #222; }
+.scan-stat-value.blue  { color: #185FA5; }
+.scan-stat-value.amber { color: #BA7517; }
+.scan-rows { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; }
+.scan-row { display: flex; align-items: center; gap: 8px; }
+.scan-row-label { font-size: 11px; color: #555; width: 90px; flex-shrink: 0; }
+.scan-track { flex: 1; height: 7px; background: #efefef; border-radius: 999px; overflow: hidden; }
+.scan-fill  { height: 100%; border-radius: 999px; background: #E24B4A;
+              transition: width .6s cubic-bezier(.4,0,.2,1), background .4s; }
+.scan-fill.mid  { background: #EF9F27; }
+.scan-fill.done { background: #639922; }
+.scan-pct { font-size: 11px; font-weight: 700; color: #185FA5; width: 32px; text-align: right; flex-shrink:0; }
+.scan-log {
+  background: #f8f8f8;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  padding: 5px 8px;
+  max-height: 90px;
+  overflow-y: auto;
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+}
+.scan-log-item { padding: 1px 0; color: #555; }
+.scan-log-item.change { background:#e8f4e8; border-left:3px solid #3B6D11; padding:1px 5px; color:#1a4a08; font-weight:500; border-radius:2px; margin:1px 0; }
+.scan-log-item.warn   { background:#fef4e4; border-left:3px solid #BA7517; padding:1px 5px; color:#5a3500; border-radius:2px; margin:1px 0; }
+.scan-log-item.err    { background:#fde8e8; border-left:3px solid #A32D2D; padding:1px 5px; color:#500; border-radius:2px; margin:1px 0; }
 .sb-dot  { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; }
 .sb-dot.green  { background:#008800; }
 .sb-dot.red    { background:#cc0000; }
@@ -883,6 +974,42 @@ body {
     </div>
     <div class="modal-body" id="logBody">読み込み中...</div>
   </div>
+</div>
+
+<!-- 走査進捗パネル -->
+<div class="scan-panel" id="scanPanel">
+  <div class="scan-stats">
+    <div class="scan-stat">
+      <div class="scan-stat-label">走査済み</div>
+      <div class="scan-stat-value blue" id="sp-scanned">0</div>
+    </div>
+    <div class="scan-stat">
+      <div class="scan-stat-label">合計 (due)</div>
+      <div class="scan-stat-value" id="sp-total">0</div>
+    </div>
+    <div class="scan-stat">
+      <div class="scan-stat-label">価格変動</div>
+      <div class="scan-stat-value amber" id="sp-changes">0</div>
+    </div>
+  </div>
+  <div class="scan-rows">
+    <div class="scan-row">
+      <span class="scan-row-label">価格取得</span>
+      <div class="scan-track"><div class="scan-fill" id="sf-price" style="width:0%"></div></div>
+      <span class="scan-pct" id="sp-price">0%</span>
+    </div>
+    <div class="scan-row">
+      <span class="scan-row-label">メタデータ</span>
+      <div class="scan-track"><div class="scan-fill" id="sf-meta"  style="width:0%"></div></div>
+      <span class="scan-pct" id="sp-meta">0%</span>
+    </div>
+    <div class="scan-row">
+      <span class="scan-row-label">割引チェック</span>
+      <div class="scan-track"><div class="scan-fill" id="sf-sale"  style="width:0%"></div></div>
+      <span class="scan-pct" id="sp-sale">0%</span>
+    </div>
+  </div>
+  <div class="scan-log" id="scanLog"></div>
 </div>
 
 <!-- ステータスバー -->
@@ -1182,6 +1309,79 @@ function onSearch() {
 
 function exportData(fmt) { window.open('/api/export/' + fmt, '_blank'); }
 
+// ── 走査進捗パネル制御 ────────────────────────────────────────────────────────
+let _spScanned = 0, _spTotal = 0, _spChanges = 0;
+let _sseConn   = null;
+const SCAN_LOG_MAX = 40;
+
+function _spSetBar(fillId, pctId, pct) {
+  const fill = document.getElementById(fillId);
+  const pctEl = document.getElementById(pctId);
+  if (!fill || !pctEl) return;
+  fill.style.width = pct + '%';
+  fill.className = 'scan-fill' + (pct >= 80 ? ' done' : pct >= 40 ? ' mid' : '');
+  pctEl.textContent = pct + '%';
+}
+
+function _spUpdate() {
+  const el = id => document.getElementById(id);
+  el('sp-scanned').textContent = _spScanned.toLocaleString();
+  el('sp-total').textContent   = _spTotal.toLocaleString();
+  el('sp-changes').textContent = _spChanges;
+  const pct = _spTotal > 0 ? Math.min(100, Math.round(_spScanned / _spTotal * 100)) : 0;
+  _spSetBar('sf-price', 'sp-price', pct);
+  _spSetBar('sf-meta',  'sp-meta',  Math.min(Math.round(pct * 0.7), 100));
+  _spSetBar('sf-sale',  'sp-sale',  Math.min(Math.round(pct * 0.5), 100));
+}
+
+function _spLog(msg, type) {
+  const el = document.getElementById('scanLog');
+  if (!el) return;
+  const now = new Date();
+  const ts  = [now.getHours(), now.getMinutes(), now.getSeconds()]
+                .map(n => String(n).padStart(2,'0')).join(':');
+  const div = document.createElement('div');
+  div.className = 'scan-log-item' + (type ? ' ' + type : '');
+  div.textContent = '[' + ts + '] ' + msg;
+  el.prepend(div);
+  while (el.children.length > SCAN_LOG_MAX) el.removeChild(el.lastChild);
+}
+
+function _spShow(show) {
+  document.getElementById('scanPanel')?.classList.toggle('active', show);
+}
+
+function _spStartSSE() {
+  if (_sseConn) { _sseConn.close(); _sseConn = null; }
+  if (typeof EventSource === 'undefined') { _spStartPolling(); return; }
+  _sseConn = new EventSource('/api/log-stream');
+  _sseConn.addEventListener('log',    e => _spLog(e.data));
+  _sseConn.addEventListener('change', e => { _spChanges++; _spLog(e.data, 'change'); _spUpdate(); });
+  _sseConn.addEventListener('warn',   e => _spLog(e.data, 'warn'));
+  _sseConn.addEventListener('error',  e => _spLog(e.data, 'err'));
+  _sseConn.onerror = () => {
+    _spLog('接続が切れました。再接続中...', 'warn');
+    setTimeout(() => { if (_sseConn) _spStartSSE(); }, 5000);
+  };
+}
+
+function _spStopSSE() {
+  if (_sseConn) { _sseConn.close(); _sseConn = null; }
+}
+
+// polling fallback（EventSource が使えない環境）
+function _spStartPolling() {
+  setInterval(async () => {
+    const s = await api('/api/run/status');
+    if (!s) return;
+    const p = s.progress ?? {};
+    if (p.found > _spScanned) {
+      _spScanned = p.found;
+      _spUpdate();
+    }
+  }, 2000);
+}
+
 // ── ログモーダル ────────────────────────────────────────────────────────────
 async function showLog() {
   document.getElementById('logModal').classList.add('open');
@@ -1258,6 +1458,23 @@ async function _waitJobDone(job, btn) {
   let tries = 0;
   showProgress(true);
 
+  // 走査パネルを表示して SSE 接続
+  if (job === 'fetch' || job === 'all') {
+    const status = await api('/api/stats');
+    _spTotal   = status?.dueNow ?? 0;
+    _spScanned = 0; _spChanges = 0;
+    _spUpdate();
+    _spShow(true);
+    _spStartSSE();
+    _spLog((_JOB_LABELS[job] ?? job) + ' 開始...');
+  } else if (job === 'discover' || job.startsWith('fullscan')) {
+    _spScanned = 0; _spTotal = 0; _spChanges = 0;
+    _spUpdate();
+    _spShow(true);
+    _spStartSSE();
+    _spLog((_JOB_LABELS[job] ?? job) + ' 開始...');
+  }
+
   const id = setInterval(async () => {
     tries++;
     const s = await api('/api/run/status');
@@ -1273,6 +1490,15 @@ async function _waitJobDone(job, btn) {
       await loadStats();
       await loadWorks(_page);
       showProgress(false);
+
+      // 走査パネルを完了表示にしてから5秒後に閉じる
+      if (document.getElementById('scanPanel')?.classList.contains('active')) {
+        _spScanned = _spTotal;
+        _spUpdate();
+        _spLog('完了 — ' + _spChanges + '件の価格変動を検出', _spChanges > 0 ? 'change' : '');
+        _spStopSSE();
+        setTimeout(() => _spShow(false), 5000);
+      }
 
       if (p.done && (job === 'fullscan' || job === 'fullscan_sale')) {
         setStatus('全収集完了 — 新規: ' + (s.fullScanProgress?.grandTotal ?? p.found ?? 0) + ' 件');

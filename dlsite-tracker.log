@@ -6,3 +6,5 @@
 2026-05-26T09:04:40.868Z [INFO ] [main] DLsite price tracker start {"args":{"mode":"status"}}
 2026-05-26T09:04:41.208Z [INFO ] [db] loaded /home/claude/siterunning./dlsite.db
 2026-05-26T09:04:41.270Z [INFO ] [db] closed
+2026-05-26T20:46:33.381Z [INFO ] [db] loaded /home/claude/siterunning./dlsite.db
+2026-05-26T20:46:33.513Z [INFO ] [db] closed
