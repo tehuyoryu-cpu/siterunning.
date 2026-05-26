@@ -32,11 +32,15 @@ const config = require('../config');
 const _jobRunning = { discover: false, fetch: false, saleboost: false, fullscan: false, fullscan_sale: false, all: false };
 
 /** POST /api/run/:job  → 即時実行トリガー */
+// 直近のジョブ結果を保持
+const _lastResult = {};
+
 async function handleRun(job, res) {
   if (_jobRunning[job]) {
     return _json(res, { ok: false, message: `${job} is already running` });
   }
   _jobRunning[job] = true;
+  _lastResult[job] = null;
 
   // レスポンスをすぐ返してからバックグラウンドで実行
   _json(res, { ok: true, message: `${job} started` });
@@ -44,10 +48,12 @@ async function handleRun(job, res) {
   try {
     if (job === 'discover') {
       Object.assign(_progress, { job, page: 0, found: 0, site: 'maniax', startedAt: Math.floor(Date.now()/1000), done: false });
-      await runDiscovery();
+      const r = await runDiscovery();
+      _lastResult[job] = { ok: true, discovered: r?.discovered ?? 0, finishedAt: Date.now() };
     } else if (job === 'fetch') {
       Object.assign(_progress, { job, page: 0, found: 0, site: null, startedAt: Math.floor(Date.now()/1000), done: false });
-      await detailFetcher.runDetailFetch(300);
+      const r = await detailFetcher.runDetailFetch(300);
+      _lastResult[job] = { ok: true, ...r, finishedAt: Date.now() };
     } else if (job === 'saleboost') {
       const circles = db.getCirclesOnSale();
       db.transaction(() => {
@@ -83,6 +89,7 @@ async function handleRun(job, res) {
     }
   } catch (err) {
     log.error('[api] run error', job, err.message);
+    _lastResult[job] = { ok: false, error: err.message, finishedAt: Date.now() };
   } finally {
     _jobRunning[job] = false;
     _progress.done = true;
@@ -114,6 +121,8 @@ function handleRunStatus() {
     fullscan:      _jobRunning.fullscan ?? false,
     fullscan_sale: _jobRunning.fullscan_sale ?? false,
     progress:      { ..._progress, elapsed },
+    lastResult:    _lastResult,
+    recentErrors:  log.getRecentErrors().slice(-10),
   };
 }
 
@@ -212,6 +221,20 @@ function createServer() {
           res.writeHead(405); res.end('POST only'); return;
         }
         handleRun(runMatch[1], res);  // レスポンスは関数内で返す
+        return;
+      }
+
+      if (pathname === '/api/log') {
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        try {
+          const logPath = log.getLogPath();
+          const { readFileSync } = require('fs');
+          const content = readFileSync(logPath, 'utf8');
+          // 直近200行だけ返す
+          res.end(content.split('\n').slice(-200).join('\n'));
+        } catch (e) {
+          res.end('(ログファイルなし: ' + e.message + ')');
+        }
         return;
       }
 
@@ -354,6 +377,36 @@ body {
 .tb-btn.active { background:#cce4f7; border-color:#005499; }
 .tb-btn svg    { width:16px; height:16px; flex-shrink:0; }
 .tb-sep { width:1px; background:#999; height:20px; margin:0 3px; }
+.tb-btn.running { background:#fff4cc; border-color:#cc8800; color:#884400; cursor:wait; }
+.tb-btn.running svg { animation: spin 1s linear infinite; }
+@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+
+/* ── ログモーダル ── */
+.modal-overlay {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,.5);
+  z-index:999; align-items:center; justify-content:center;
+}
+.modal-overlay.open { display:flex; }
+.modal-box {
+  background:#fff; width:80vw; max-width:900px; height:70vh;
+  border:1px solid #999; border-radius:3px; display:flex; flex-direction:column;
+  box-shadow:0 4px 20px rgba(0,0,0,.3);
+}
+.modal-header {
+  background:linear-gradient(to bottom,#0055aa,#0078d7); color:#fff;
+  padding:6px 12px; display:flex; align-items:center; gap:8px;
+  font-weight:bold; font-size:13px; border-radius:2px 2px 0 0;
+}
+.modal-close { margin-left:auto; cursor:pointer; font-size:16px; opacity:.8; }
+.modal-close:hover { opacity:1; }
+.modal-body {
+  flex:1; overflow:auto; padding:8px 12px;
+  font-family:"Courier New",monospace; font-size:11px;
+  white-space:pre; line-height:1.5; color:#333;
+  background:#f8f8ff;
+}
+.log-error { color:#cc0000; }
+.log-warn  { color:#cc6600; }
 .tb-btn.running { background:#fff4cc; border-color:#cc8800; color:#884400; cursor:wait; }
 .tb-btn.running svg { animation: spin 1s linear infinite; }
 @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
@@ -763,6 +816,11 @@ body {
     <svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="2" fill="none" stroke="#cc0000" stroke-width="1.3"/><path d="M4 8h8M8 4v8" stroke="#cc0000" stroke-width="1.5" stroke-linecap="round"/></svg>
     全セール収集
   </button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" onclick="showLog()" title="ログを確認">
+    <svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="13" rx="1" fill="#fff" stroke="#888"/><path d="M3 5h10M3 8h10M3 11h6" stroke="#555" stroke-width="1.2" stroke-linecap="round"/></svg>
+    ログ確認
+  </button>
 </div>
 
 <!-- フィルタバー -->
@@ -814,6 +872,17 @@ body {
     </div>
   </div>
 
+</div>
+
+<!-- ログモーダル -->
+<div class="modal-overlay" id="logModal" onclick="if(event.target===this)closeLog()">
+  <div class="modal-box">
+    <div class="modal-header">
+      📋 ログ — dlsite-tracker.log
+      <span class="modal-close" onclick="closeLog()">✕</span>
+    </div>
+    <div class="modal-body" id="logBody">読み込み中...</div>
+  </div>
 </div>
 
 <!-- ステータスバー -->
@@ -1113,6 +1182,40 @@ function onSearch() {
 
 function exportData(fmt) { window.open('/api/export/' + fmt, '_blank'); }
 
+// ── ログモーダル ────────────────────────────────────────────────────────────
+async function showLog() {
+  document.getElementById('logModal').classList.add('open');
+  const body = document.getElementById('logBody');
+  body.textContent = '読み込み中...';
+  try {
+    const r = await fetch('/api/log');
+    const text = await r.text();
+    // 色付け
+    body.innerHTML = text.split('\n').map(line => {
+      if (line.includes('[ERROR]')) return '<span class="log-error">' + esc(line) + '</span>';
+      if (line.includes('[WARN')) return '<span class="log-warn">' + esc(line) + '</span>';
+      return esc(line);
+    }).join('\n');
+    body.scrollTop = body.scrollHeight; // 最新行へスクロール
+  } catch(e) { body.textContent = 'エラー: ' + e.message; }
+}
+function closeLog() { document.getElementById('logModal').classList.remove('open'); }
+
+// ── ジョブ完了後の結果表示 ──────────────────────────────────────────────────
+function _showJobResult(job, status) {
+  const r = status.lastResult?.[job];
+  if (!r) return;
+  if (!r.ok) {
+    setStatus('⚠ ' + (r.error || 'エラー'));
+    return;
+  }
+  if (job === 'discover')    setStatus('RJ収集完了 — 新規: ' + (r.discovered ?? 0) + ' 件');
+  else if (job === 'fetch')  setStatus('価格更新完了 — 処理: ' + (r.processed ?? 0) + ' 件 / 変化: ' + (r.priceChanges ?? 0) + ' 件');
+  else if (job === 'all')    setStatus('全て巡回完了');
+  else if (job?.startsWith('fullscan')) setStatus('全収集完了 — ' + (status.fullScanProgress?.grandTotal ?? 0) + ' 件');
+  else setStatus((_JOB_LABELS[job] ?? job) + ' 完了');
+}
+
 // ── ジョブ実行 ────────────────────────────────────────────────────────────
 const _JOB_LABELS = {
   discover:      'RJ収集',
@@ -1174,7 +1277,7 @@ async function _waitJobDone(job, btn) {
       if (p.done && (job === 'fullscan' || job === 'fullscan_sale')) {
         setStatus('全収集完了 — 新規: ' + (s.fullScanProgress?.grandTotal ?? p.found ?? 0) + ' 件');
       } else {
-        setStatus(_JOB_LABELS[job] + ' 完了');
+        _showJobResult(job, s);
       }
     }
   }, 1500);

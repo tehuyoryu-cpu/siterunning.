@@ -2,28 +2,63 @@
 
 /**
  * crawler/logger.js
- * Minimal structured logger. No external dependencies.
- * Outputs ISO timestamp + level + message to stdout/stderr.
+ * ログをstdout/stderr + ファイル（dlsite-tracker.log）に同時出力。
+ * exeでもログが確認できる。
  */
 
-const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
-const ENV_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
-const MIN_LEVEL = LEVELS[ENV_LEVEL] ?? 1;
+const fs   = require('fs');
+const path = require('path');
+
+const LEVELS   = { debug: 0, info: 1, warn: 2, error: 3 };
+const MIN_LEVEL = LEVELS[(process.env.LOG_LEVEL || 'info').toLowerCase()] ?? 1;
+
+// ログファイルパス: exeの隣 or カレントディレクトリ
+const LOG_DIR  = process.env.PORTABLE_EXECUTABLE_DIR
+  || (process.resourcesPath ? path.join(process.resourcesPath, '..') : null)
+  || process.cwd();
+const LOG_PATH = path.join(LOG_DIR, 'dlsite-tracker.log');
+
+// 直近の warn/error を最大50件保持（UIに表示するため）
+const _recentErrors = [];
+const MAX_ERRORS = 50;
+
+// ファイルストリーム（遅延初期化）
+let _stream = null;
+function _getStream() {
+  if (_stream) return _stream;
+  try {
+    _stream = fs.createWriteStream(LOG_PATH, { flags: 'a' });
+    _stream.on('error', () => { _stream = null; });
+  } catch {}
+  return _stream;
+}
 
 function _log(level, ...args) {
   if ((LEVELS[level] ?? 0) < MIN_LEVEL) return;
 
   const ts  = new Date().toISOString();
   const msg = args.map(a =>
-    typeof a === 'object' ? JSON.stringify(a, null, 0) : String(a)
+    a instanceof Error    ? a.message :
+    typeof a === 'object' ? JSON.stringify(a) :
+    String(a)
   ).join(' ');
 
-  const line = `${ts} [${level.toUpperCase()}] ${msg}`;
+  const line = `${ts} [${level.toUpperCase().padEnd(5)}] ${msg}\n`;
 
+  // stdout/stderr
   if (level === 'error' || level === 'warn') {
-    process.stderr.write(line + '\n');
+    process.stderr.write(line);
   } else {
-    process.stdout.write(line + '\n');
+    process.stdout.write(line);
+  }
+
+  // ファイル
+  try { _getStream()?.write(line); } catch {}
+
+  // 直近エラー記録
+  if (level === 'warn' || level === 'error') {
+    _recentErrors.push({ ts, level, msg });
+    if (_recentErrors.length > MAX_ERRORS) _recentErrors.shift();
   }
 }
 
@@ -32,4 +67,6 @@ module.exports = {
   info:  (...a) => _log('info',  ...a),
   warn:  (...a) => _log('warn',  ...a),
   error: (...a) => _log('error', ...a),
+  getRecentErrors: () => [..._recentErrors],
+  getLogPath: () => LOG_PATH,
 };
