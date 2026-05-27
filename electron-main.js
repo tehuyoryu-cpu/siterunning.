@@ -45,16 +45,23 @@ async function warmUpSession() {
         // 年齢確認ボタン（複数のセレクタに対応）
         await w.webContents.executeJavaScript(`
           (function() {
+            // CSS セレクタで特定できるボタンを先に試す
             const selectors = [
               'a.btn_yes', 'a[href*="adult=1"]', '.btn_adult',
               'a[href*="age_check"]', 'input[value*="はい"]',
-              'a:contains("はい")', '.age_check_yes'
+              '.age_check_yes', 'a[href*="adultchecked"]'
             ];
             for (const sel of selectors) {
               try {
                 const el = document.querySelector(sel);
                 if (el) { el.click(); return true; }
               } catch {}
+            }
+            // :contains は無効なので全 <a> をテキストで走査
+            const keywords = ['はい', '入場する', '18歳以上', 'adult', 'enter', '同意'];
+            for (const a of document.querySelectorAll('a, button')) {
+              const txt = (a.textContent || '').trim();
+              if (keywords.some(k => txt.includes(k))) { a.click(); return true; }
             }
             return false;
           })()
