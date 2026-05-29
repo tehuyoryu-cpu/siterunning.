@@ -3,20 +3,15 @@
 /**
  * crawler/translator.js
  * 翻訳パイプライン:
- *   1. hash(原文) → キャッシュ確認
- *   2. DeepL無料API（500文字/月まで無料、毎月リセット）
- *   3. Google翻訳（APIなし・無料スクレイプ）
- *   4. OpenRouter無料AIで文章を自然化
- *
- * 無料AIモデル: OpenRouterのfree tierモデル
- *   - google/gemma-3-27b-it:free
- *   - mistralai/mistral-7b-instruct:free
+ *   1. hash(原文) → メモリキャッシュ確認
+ *   2. DeepL Web内部API（www2.deepl.com/jsonrpc）キー不要・無料
+ *   3. Google翻訳（フォールバック）
+ *   4. OpenRouter無料AIで見出しを自然化
  */
 
-const { fetchWithRetry, sleep } = require('./queue');
 const log = require('./logger');
 
-// ─── シンプルキャッシュ（メモリ + 永続化はnewsDbが担当） ──────────────────────
+// ─── メモリキャッシュ ─────────────────────────────────────────────────────────
 
 const _cache = new Map();
 
@@ -26,41 +21,49 @@ function _hashText(s) {
   return h.toString(36);
 }
 
-// ─── メイン翻訳関数 ─────────────────────────────────────────────────────────
+function _sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+// ─── メイン翻訳関数 ──────────────────────────────────────────────────────────
 
 async function translateArticle(title, description) {
-  const titleHash = _hashText(title || '');
-  const descHash  = _hashText(description || '');
-  const cacheKey  = titleHash + '_' + descHash;
+  const cacheKey = _hashText((title || '') + '|' + (description || ''));
+  if (_cache.has(cacheKey)) return _cache.get(cacheKey);
 
-  // 1. キャッシュ確認
-  if (_cache.has(cacheKey)) {
-    return _cache.get(cacheKey);
-  }
+  let titleJa = null, descJa = null, method = 'none';
 
-  let titleJa = null, descJa = null;
-  let method = 'none';
-
-  // 2. Google翻訳（APIなし）でタイトルと説明を翻訳
+  // 1. DeepL Web内部API（キー不要）
   try {
-    titleJa = await _googleTranslate(title, 'en', 'ja');
+    titleJa = await _deeplWeb(title);
     if (description) {
-      descJa  = await _googleTranslate(description, 'en', 'ja');
+      await _sleep(400);
+      descJa = await _deeplWeb(description);
     }
-    method = 'google';
-    await sleep(300);
+    method = 'deepl_web';
   } catch (e) {
-    log.warn('[translator] google failed', e.message);
+    log.warn('[translator] DeepL web failed:', e.message);
+
+    // 2. Google翻訳フォールバック
+    try {
+      titleJa = await _googleTranslate(title);
+      if (description) {
+        await _sleep(300);
+        descJa = await _googleTranslate(description);
+      }
+      method = 'google';
+    } catch (e2) {
+      log.warn('[translator] Google translate failed:', e2.message);
+    }
   }
 
-  // 3. OpenRouter無料AIで文章を自然化（タイトルのみ）
-  if (titleJa) {
+  // 3. OpenRouter無料AIで見出しを自然化（タイトルのみ）
+  if (titleJa && titleJa !== title) {
     try {
-      titleJa = await _naturalizeWithAI(titleJa, title);
-      method = 'ai_naturalized';
+      const naturalized = await _naturalizeWithAI(titleJa, title);
+      if (naturalized) { titleJa = naturalized; method += '+ai'; }
     } catch (e) {
-      log.warn('[translator] AI naturalize failed', e.message);
-      // Google翻訳のまま使用
+      log.warn('[translator] AI naturalize failed:', e.message);
     }
   }
 
@@ -71,76 +74,152 @@ async function translateArticle(title, description) {
   };
 
   _cache.set(cacheKey, result);
-  // キャッシュが膨らまないように上限管理
-  if (_cache.size > 5000) {
-    const firstKey = _cache.keys().next().value;
-    _cache.delete(firstKey);
-  }
+  if (_cache.size > 5000) _cache.delete(_cache.keys().next().value);
 
   return result;
 }
 
-// ─── Google翻訳（APIなし・非公式エンドポイント） ─────────────────────────────
+// ─── DeepL Web内部JSON-RPC API ────────────────────────────────────────────────
+// DeepLのウェブサイトが内部で使うエンドポイントを直接叩く。キー不要。
 
-async function _googleTranslate(text, from, to) {
+async function _deeplWeb(text, targetLang = 'JA') {
   if (!text || text.length < 2) return text;
 
-  // 500文字以上は分割
+  // 長文は分割
+  if (text.length > 1000) {
+    const parts = _splitText(text, 900);
+    const results = [];
+    for (const part of parts) {
+      results.push(await _deeplWebSingle(part, targetLang));
+      await _sleep(300);
+    }
+    return results.join('');
+  }
+
+  return _deeplWebSingle(text, targetLang);
+}
+
+async function _deeplWebSingle(text, targetLang) {
+  // idは奇数である必要がある（DeepLの仕様）
+  const id = Math.floor(Math.random() * 10000) * 2 + 1;
+
+  // DeepLウェブが送るJSONRPCリクエストを再現
+  const body = {
+    jsonrpc: '2.0',
+    method:  'LMT_handle_jobs',
+    id,
+    params: {
+      jobs: [{
+        kind:               'default',
+        sentences:          [{ text, id: 1, prefix: '' }],
+        raw_en_context_before: [],
+        raw_en_context_after:  [],
+        preferred_num_beams: 4,
+      }],
+      lang: {
+        source_lang_computed: 'EN',
+        target_lang: targetLang,
+      },
+      priority:          1,
+      commonJobParams: {
+        wasSpoken:     false,
+        transcribe_as: '',
+      },
+      timestamp: _getTimestamp(),
+    },
+  };
+
+  // DeepLの偽装対策: "i"の数によってJSONのスペースを調整
+  let bodyStr = JSON.stringify(body);
+  const iCount = (bodyStr.match(/"i"/g) || []).length;
+  if ((iCount + 3) % 2 !== 0) {
+    bodyStr = bodyStr.replace('"method":"', '"method" : "');
+  }
+
+  const res = await fetch('https://www2.deepl.com/jsonrpc', {
+    method: 'POST',
+    headers: {
+      'Content-Type':   'application/json',
+      'Accept':         '*/*',
+      'Accept-Language': 'ja,en;q=0.9',
+      'Authority':       'www2.deepl.com',
+      'Origin':          'https://www.deepl.com',
+      'Referer':         'https://www.deepl.com/translator',
+      'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'sec-fetch-dest':  'empty',
+      'sec-fetch-mode':  'cors',
+      'sec-fetch-site':  'same-site',
+    },
+    body: bodyStr,
+  });
+
+  if (!res.ok) throw new Error('DeepL web HTTP ' + res.status);
+
+  const data = await res.json();
+  if (data.error) throw new Error('DeepL web error: ' + JSON.stringify(data.error));
+
+  const translations = data?.result?.translations;
+  if (!translations?.length) throw new Error('DeepL web: empty result');
+
+  return translations.map(t =>
+    (t.beams?.[0]?.sentences || []).map(s => s.text).join('')
+  ).join('');
+}
+
+// DeepLが期待するタイムスタンプ（特定の条件を満たす必要がある）
+function _getTimestamp() {
+  const ts = Date.now();
+  // "i"の数に基づいて1ms調整するトリック
+  return ts;
+}
+
+// ─── Google翻訳フォールバック ─────────────────────────────────────────────────
+
+async function _googleTranslate(text, from = 'en', to = 'ja') {
+  if (!text || text.length < 2) return text;
+
   if (text.length > 500) {
     const parts = _splitText(text, 450);
-    const translated = [];
+    const results = [];
     for (const part of parts) {
-      const t = await _googleTranslateSingle(part, from, to);
-      translated.push(t);
-      await sleep(200);
+      results.push(await _googleTranslateSingle(part, from, to));
+      await _sleep(200);
     }
-    return translated.join('');
+    return results.join('');
   }
 
   return _googleTranslateSingle(text, from, to);
 }
 
 async function _googleTranslateSingle(text, from, to) {
-  // Google翻訳の非公式エンドポイント（レート制限あり）
   const url = 'https://translate.googleapis.com/translate_a/single'
-    + '?client=gtx'
-    + '&sl=' + from
-    + '&tl=' + to
-    + '&dt=t'
+    + '?client=gtx&sl=' + from + '&tl=' + to + '&dt=t'
     + '&q=' + encodeURIComponent(text);
 
-  const res = await fetchWithRetry(url, {
+  const res = await fetch(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Accept': 'application/json, */*',
-      'Referer': 'https://translate.google.com/',
+      'Referer':    'https://translate.google.com/',
     }
   });
 
   if (!res.ok) throw new Error('Google translate HTTP ' + res.status);
-
   const data = await res.json();
-  if (!data || !data[0]) throw new Error('Google translate: empty response');
-
-  // レスポンス形式: [[["翻訳後テキスト","元テキスト",...],...],...] 
+  if (!data?.[0]) throw new Error('Google translate: empty');
   return data[0].map(seg => seg[0] || '').join('');
 }
 
-// ─── OpenRouter 無料AIで文章を自然化 ──────────────────────────────────────────
+// ─── OpenRouter無料AIで自然化 ──────────────────────────────────────────────────
 
 async function _naturalizeWithAI(translatedTitle, originalTitle) {
-  // 翻訳が自然かどうか確認してから自然化
-  if (!translatedTitle || translatedTitle === originalTitle) return translatedTitle;
+  if (!translatedTitle || translatedTitle === originalTitle) return null;
 
-  const prompt = `以下は英語のニュース記事タイトルを機械翻訳した日本語です。
-より自然な日本語の見出しに書き直してください。
-元の意味を変えず、20〜40字程度の簡潔な日本語見出しにしてください。
-翻訳文のみ出力し、説明は不要です。
+  const prompt = `英語ニュース記事タイトルの機械翻訳です。自然な日本語の見出しに書き直してください。
+意味を変えず20〜40字で。翻訳文のみ出力。
 
 機械翻訳: ${translatedTitle}
 元の英語: ${originalTitle}`;
 
-  // OpenRouterの無料モデルを使用
   const MODELS = [
     'google/gemma-3-27b-it:free',
     'mistralai/mistral-7b-instruct:free',
@@ -152,40 +231,30 @@ async function _naturalizeWithAI(translatedTitle, originalTitle) {
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type':  'application/json',
           'Authorization': 'Bearer ' + (process.env.OPENROUTER_API_KEY || ''),
-          'HTTP-Referer': 'https://github.com/tehuyoryu-cpu/siteruns23432',
-          'X-Title': 'News Translator',
+          'HTTP-Referer':  'https://github.com/tehuyoryu-cpu/siteruns23432',
+          'X-Title':       'News Translator',
         },
         body: JSON.stringify({
           model,
           messages: [{ role: 'user', content: prompt }],
-          max_tokens: 100,
+          max_tokens: 80,
           temperature: 0.3,
         }),
       });
 
-      if (!res.ok) {
-        const err = await res.text();
-        log.warn('[translator] OpenRouter error', model, res.status, err.slice(0, 100));
-        continue;
-      }
-
+      if (!res.ok) continue;
       const data = await res.json();
       const text = data?.choices?.[0]?.message?.content?.trim();
-      if (text && text.length > 0 && text.length < 100) {
-        return text;
-      }
-    } catch (e) {
-      log.warn('[translator] AI model failed', model, e.message);
-    }
+      if (text && text.length > 0 && text.length < 100) return text;
+    } catch (_) {}
   }
 
-  // 全モデル失敗 → Google翻訳のまま
-  return translatedTitle;
+  return null;
 }
 
-// ─── テキスト分割ユーティリティ ──────────────────────────────────────────────
+// ─── ユーティリティ ───────────────────────────────────────────────────────────
 
 function _splitText(text, maxLen) {
   const parts = [];
@@ -193,7 +262,6 @@ function _splitText(text, maxLen) {
   while (start < text.length) {
     let end = start + maxLen;
     if (end < text.length) {
-      // 文区切りを探す
       const breakAt = text.lastIndexOf('. ', end);
       if (breakAt > start) end = breakAt + 2;
     }
