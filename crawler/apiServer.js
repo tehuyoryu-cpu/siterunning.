@@ -23,6 +23,7 @@
 const http   = require('http');
 const url    = require('url');
 const db     = require('./db');
+const newsDb = require('./newsDb');
 const log    = require('./logger');
 const config = require('../config');
 
@@ -197,6 +198,23 @@ function handleExportCsv() {
   return header + rows.join('\n');
 }
 
+
+// ─── News API handlers ───────────────────────────────────────────────────────
+
+function handleNewsArticles(query) {
+  const page     = Math.max(1, parseInt(query.page ?? '1', 10));
+  const limit    = Math.min(50, parseInt(query.limit ?? '30', 10));
+  const category = query.category || null;
+  const lang     = query.lang || null;
+  const q        = (query.q ?? '').trim() || null;
+  const sourceId = query.source || null;
+  return newsDb.getArticles({ category, lang, page, limit, q, sourceId });
+}
+
+function handleNewsStats() {
+  return newsDb.getNewsStats();
+}
+
 // ─── HTTP server ──────────────────────────────────────────────────────────────
 
 function createServer() {
@@ -298,6 +316,14 @@ function createServer() {
         return;
       }
 
+      if (pathname === '/api/news') {
+        return _json(res, handleNewsArticles(query));
+      }
+
+      if (pathname === '/api/news/stats') {
+        return _json(res, handleNewsStats());
+      }
+
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Not found' }));
     } catch (err) {
@@ -313,6 +339,8 @@ function createServer() {
 function start() {
   const port = config.ui.port;
   const host = config.ui.host;
+  // ニュースDBを初期化（非同期、エラーは無視）
+  newsDb.init().catch(err => log.warn('[api] newsDb init failed', err.message));
   const server = createServer();
 
   server.listen(port, host, () => {
