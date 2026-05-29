@@ -20,12 +20,15 @@ const db     = require('./db');
 const log    = require('./logger');
 const { runDiscovery }   = require('./discovery');
 const { runDetailFetch } = require('./detailFetcher');
+const { runNewsCrawl }   = require('./newsCrawler');
+const newsDb             = require('./newsDb');
 
 // Lock flags prevent overlapping runs of the same job type
 const _running = {
   discovery: false,
   detail:    false,
   saleBoost: false,
+  news:      false,
 };
 
 // ─── discovery job ───────────────────────────────────────────────────────────
@@ -107,6 +110,27 @@ function _startSaleBoostJob() {
 
 // ─── daily backup job ────────────────────────────────────────────────────────
 
+// ─── news crawl job ──────────────────────────────────────────────────────────
+
+function _startNewsJob() {
+  // ニュースは1時間ごとにクロール
+  cron.schedule('0 * * * *', async () => {
+    if (_running.news) {
+      log.warn('[scheduler] news crawl still running, skip');
+      return;
+    }
+    _running.news = true;
+    try {
+      await runNewsCrawl({ maxPerSource: 10, translateAll: true });
+    } catch (err) {
+      log.error('[scheduler] news error', err.message);
+    } finally {
+      _running.news = false;
+    }
+  });
+  log.info('[scheduler] news job scheduled (every 1h)');
+}
+
 function _startBackupJob() {
   cron.schedule('0 3 * * *', () => {
     try {
@@ -131,9 +155,18 @@ async function start() {
   _startDetailJob();
   _startSaleBoostJob();
   _startBackupJob();
+  _startNewsJob();
 
   // Initial run on startup (don't wait for cron trigger)
   log.info('[scheduler] running initial passes on startup');
+
+  // ニュースDBを初期化して初回クロール
+  newsDb.init().then(() => {
+    _running.news = true;
+    runNewsCrawl({ maxPerSource: 5, translateAll: true })
+      .catch(err => log.error('[scheduler] initial news error', err.message))
+      .finally(() => { _running.news = false; });
+  }).catch(err => log.error('[scheduler] newsDb init error', err.message));
 
   _running.discovery = true;
   runDiscovery()
