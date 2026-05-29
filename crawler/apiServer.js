@@ -881,6 +881,57 @@ body {
 .works-list::-webkit-scrollbar-track { background:#f0f0f0; border-left:1px solid #ccc; }
 .works-list::-webkit-scrollbar-thumb { background:linear-gradient(to right,#ccc,#d8d8d8); border:1px solid #aaa; }
 .works-list::-webkit-scrollbar-button { height:16px; background:#f0f0f0; border:1px solid #ccc; display:block; }
+
+/* ── ニュースページ ── */
+.news-filters {
+  display:flex;gap:6px;align-items:center;padding:4px 8px;
+  background:#f8f8f8;border-bottom:1px solid #ccc;flex-shrink:0;flex-wrap:wrap;
+}
+.news-filters label {font-size:11px;color:#555;}
+.news-filters select,.news-filters input {
+  height:20px;border:1px solid #aaa;border-radius:1px;
+  padding:0 4px;font-family:inherit;font-size:11px;background:#fff;
+}
+.news-filters input {width:180px;}
+.news-list {flex:1;overflow-y:auto;padding:6px 8px;display:flex;flex-direction:column;gap:4px;}
+.news-card {
+  background:#fff;border:1px solid #ddd;border-radius:3px;padding:8px 10px;
+  cursor:pointer;transition:border-color .15s,background .15s;
+}
+.news-card:hover {background:#f0f7ff;border-color:#0078d7;}
+.news-card-head {display:flex;align-items:center;gap:6px;margin-bottom:3px;}
+.news-badge {
+  font-size:9px;font-weight:bold;padding:1px 5px;border-radius:2px;
+  background:#0078d7;color:#fff;white-space:nowrap;flex-shrink:0;
+}
+.news-badge.tech    {background:#006633;}
+.news-badge.culture {background:#660066;}
+.news-badge.game    {background:#cc4400;}
+.news-badge.anime   {background:#994400;}
+.news-badge.business{background:#004499;}
+.news-badge.entertainment{background:#880044;}
+.news-badge.music   {background:#443300;}
+.news-badge.science {background:#004444;}
+.news-source {font-size:10px;color:#888;}
+.news-date   {font-size:10px;color:#aaa;margin-left:auto;}
+.news-title-ja {font-size:13px;font-weight:bold;color:#111;line-height:1.3;margin-bottom:2px;}
+.news-title-en {font-size:11px;color:#666;line-height:1.3;}
+.news-desc  {font-size:11px;color:#555;line-height:1.4;margin-top:3px;
+             display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.news-pager {display:flex;align-items:center;gap:4px;padding:3px 8px;
+             background:#f0f0f0;border-top:1px solid #ccc;flex-shrink:0;}
+.news-pager-btn {
+  padding:1px 8px;background:linear-gradient(to bottom,#fff,#e0e0e0);
+  border:1px solid #aaa;border-radius:2px;cursor:default;font-size:11px;
+}
+.news-pager-btn:hover {background:linear-gradient(to bottom,#e5f1fb,#c8ddf0);border-color:#0078d7;}
+.news-pager-info {font-size:11px;color:#555;flex:1;text-align:center;}
+.news-stats-bar {
+  display:flex;gap:8px;padding:3px 8px;background:#f0f0f0;
+  border-bottom:1px solid #ccc;font-size:11px;color:#555;flex-shrink:0;flex-wrap:wrap;
+}
+.news-stat-item {display:flex;gap:3px;align-items:center;}
+.news-stat-num  {font-weight:bold;color:#0055aa;}
 </style>
 </head>
 <body>
@@ -936,6 +987,11 @@ body {
     全セール収集
   </button>
   <div class="tb-sep"></div>
+  <div class="tb-sep" id="newsSep"></div>
+  <button class="tb-btn" onclick="setMainTab('news')" id="tbNews" title="ニュース">
+    <svg viewBox="0 0 16 16"><rect x="1" y="2" width="14" height="12" rx="1" fill="none" stroke="#0078d7" stroke-width="1.3"/><path d="M3 6h10M3 9h7M3 12h5" stroke="#0078d7" stroke-width="1.2" stroke-linecap="round"/></svg>
+    ニュース
+  </button>
   <button class="tb-btn" onclick="showLog()" title="ログを確認">
     <svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="13" rx="1" fill="#fff" stroke="#888"/><path d="M3 5h10M3 8h10M3 11h6" stroke="#555" stroke-width="1.2" stroke-linecap="round"/></svg>
     ログ確認
@@ -1039,6 +1095,36 @@ body {
   </div>
   <div class="scan-log" id="scanLog"></div>
 </div>
+
+
+  <!-- ニュースページ -->
+  <div class="main-area" id="newsArea" style="display:none;flex-direction:column;">
+    <div class="news-stats-bar" id="newsStatsBar">読み込み中...</div>
+    <div class="news-filters">
+      <label>カテゴリ:</label>
+      <select id="newsCatSel" onchange="loadNews(1)">
+        <option value="">全て</option>
+        <option value="culture">🌐 カルチャー</option>
+        <option value="tech">💻 テック・AI</option>
+        <option value="business">📈 ビジネス</option>
+        <option value="game">🎮 ゲーム</option>
+        <option value="anime">🎌 アニメ・漫画</option>
+        <option value="entertainment">🎬 エンタメ</option>
+        <option value="music">🎵 音楽</option>
+        <option value="science">🔬 科学</option>
+      </select>
+      <label>言語:</label>
+      <select id="newsLangSel" onchange="loadNews(1)">
+        <option value="">全て</option>
+        <option value="en">English</option>
+        <option value="ja">日本語</option>
+      </select>
+      <label>検索:</label>
+      <input type="text" id="newsSearch" placeholder="タイトル検索..." oninput="_newsSearchDebounce()">
+    </div>
+    <div class="news-list" id="newsList">読み込み中...</div>
+    <div class="news-pager" id="newsPager"></div>
+  </div>
 
 <!-- ステータスバー -->
 <div class="statusbar">
@@ -1591,6 +1677,112 @@ function esc(s) {
   if (!s) return '';
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+
+// ── ニュース ────────────────────────────────────────────────────────────────
+let _newsPage = 1, _newsSearchTimer = null;
+
+function _newsSearchDebounce() {
+  clearTimeout(_newsSearchTimer);
+  _newsSearchTimer = setTimeout(() => loadNews(1), 300);
+}
+
+async function loadNews(page = 1) {
+  _newsPage = page;
+  const cat  = document.getElementById('newsCatSel')?.value || '';
+  const lang = document.getElementById('newsLangSel')?.value || '';
+  const q    = document.getElementById('newsSearch')?.value || '';
+  const params = new URLSearchParams({ page, limit: 30 });
+  if (cat)  params.set('category', cat);
+  if (lang) params.set('lang', lang);
+  if (q)    params.set('q', q);
+
+  const data = await api('/api/news?' + params);
+  const el = document.getElementById('newsList');
+  if (!data || !data.articles) {
+    el.innerHTML = '<div style="padding:20px;color:#888;text-align:center">取得失敗</div>';
+    return;
+  }
+
+  if (!data.articles.length) {
+    el.innerHTML = '<div style="padding:20px;color:#888;text-align:center">記事が見つかりません</div>';
+    document.getElementById('newsPager').innerHTML = '';
+    return;
+  }
+
+  el.innerHTML = data.articles.map(a => newsCardHTML(a)).join('');
+
+  // pager
+  const pager = document.getElementById('newsPager');
+  if (data.pages <= 1) {
+    pager.innerHTML = '<span class="news-pager-info">' + data.total + ' 件</span>';
+  } else {
+    pager.innerHTML =
+      '<div class="news-pager-btn" onclick="loadNews(' + Math.max(1, page-1) + ')">◀</div>' +
+      '<span class="news-pager-info">' + page + ' / ' + data.pages + ' (' + data.total + ' 件)</span>' +
+      '<div class="news-pager-btn" onclick="loadNews(' + Math.min(data.pages, page+1) + ')">▶</div>';
+  }
+}
+
+function newsCardHTML(a) {
+  const catMap = {
+    culture: '🌐 カルチャー', tech: '💻 テック', business: '📈 ビジネス',
+    game: '🎮 ゲーム', anime: '🎌 アニメ', entertainment: '🎬 エンタメ',
+    music: '🎵 音楽', science: '🔬 科学',
+  };
+  const dateStr = a.pub_date ? new Date(a.pub_date * 1000).toLocaleDateString('ja-JP', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+  const titleDisplay = a.title_ja || a.title;
+  const showOrig = a.title_ja && a.title_ja !== a.title;
+  return '<div class="news-card" onclick="window.open('' + esc(a.url) + '','_blank')">' +
+    '<div class="news-card-head">' +
+    '<span class="news-badge ' + esc(a.category) + '">' + esc(catMap[a.category] || a.category) + '</span>' +
+    '<span class="news-source">' + esc(a.source_name) + '</span>' +
+    '<span class="news-date">' + esc(dateStr) + '</span>' +
+    '</div>' +
+    '<div class="news-title-ja">' + esc(titleDisplay) + '</div>' +
+    (showOrig ? '<div class="news-title-en">' + esc(a.title) + '</div>' : '') +
+    (a.desc_ja || a.description ? '<div class="news-desc">' + esc(a.desc_ja || a.description) + '</div>' : '') +
+    '</div>';
+}
+
+async function loadNewsStats() {
+  const data = await api('/api/news/stats');
+  const el = document.getElementById('newsStatsBar');
+  if (!data || !el) return;
+  const total = data.total || 0;
+  const cats = {};
+  (data.byCategory || []).forEach(r => {
+    cats[r.category] = (cats[r.category] || 0) + (r.n || 0);
+  });
+  el.innerHTML = '<span class="news-stat-item">合計: <b class="news-stat-num">' + total + '</b> 記事</span>' +
+    Object.entries(cats).slice(0, 5).map(([c, n]) =>
+      '<span class="news-stat-item">' + esc(c) + ': <b class="news-stat-num">' + n + '</b></span>'
+    ).join('');
+}
+
+// ── メインタブ切り替え（DLsite ↔ ニュース） ──────────────────────────────────
+function setMainTab(tab) {
+  const dlArea   = document.querySelector('.main-area:not(#newsArea)');
+  const newsArea = document.getElementById('newsArea');
+  const tb       = document.getElementById('tbNews');
+  const tbAll    = document.getElementById('tbAll');
+  const tbSale   = document.getElementById('tbSale');
+
+  if (tab === 'news') {
+    if (dlArea)   dlArea.style.display   = 'none';
+    if (newsArea) newsArea.style.display = 'flex';
+    if (tb)     tb.classList.add('active');
+    if (tbAll)  tbAll.classList.remove('active');
+    if (tbSale) tbSale.classList.remove('active');
+    loadNews(1);
+    loadNewsStats();
+  } else {
+    if (newsArea) newsArea.style.display = 'none';
+    if (dlArea)   dlArea.style.display   = 'flex';
+    if (tb) tb.classList.remove('active');
+    setTab(tab);
+  }
+}
+
 </script>
 </body>
 </html>`;
