@@ -25,8 +25,9 @@ const url    = require('url');
 const fs     = require('fs');
 const path   = require('path');
 const db     = require('./db');
-const newsDb = require('./newsDb');
-const log    = require('./logger');
+const newsDb           = require('./newsDb');
+const { fetchArticleContent } = require('./articleFetcher');
+const log              = require('./logger');
 const config = require('../config');
 
 // ─── API handlers ────────────────────────────────────────────────────────────
@@ -353,6 +354,21 @@ function createServer() {
         }
         // GET
         return _json(res, { tickers: _loadStockTickers() });
+      }
+
+      // 記事本文取得（フェッチ＆翻訳も兼ねる）
+      const contentMatch = pathname.match(/^\/api\/news\/([^/]+)\/content$/);
+      if (contentMatch) {
+        const articleId = decodeURIComponent(contentMatch[1]);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8',
+                             'Access-Control-Allow-Origin': '*' });
+        try {
+          const result = await fetchArticleContent(articleId);
+          res.end(JSON.stringify(result));
+        } catch(e) {
+          res.end(JSON.stringify({ error: e.message }));
+        }
+        return;
       }
 
       if (pathname === '/api/news') {
@@ -1031,6 +1047,71 @@ body {
 .stock-tag.jp  { background:#ffe0e0;color:#990000; }
 .stock-tag.us  { background:#e0f0ff;color:#003399; }
 .stock-tag.idx { background:#e8ffe8;color:#006600; }
+
+/* ── リーダービュー ── */
+.reader-overlay {
+  position:fixed;inset:0;z-index:9999;
+  background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;
+}
+.reader-panel {
+  background:#fafafa;width:min(860px,94vw);height:90vh;
+  border-radius:6px;box-shadow:0 8px 32px rgba(0,0,0,.35);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.reader-header {
+  display:flex;align-items:center;gap:8px;padding:8px 12px;
+  background:#1e1e2e;color:#fff;flex-shrink:0;
+}
+.reader-header-title {
+  flex:1;font-size:13px;font-weight:bold;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.reader-controls { display:flex;gap:6px;align-items:center;flex-shrink:0; }
+.reader-btn {
+  padding:2px 10px;border:1px solid rgba(255,255,255,.3);border-radius:3px;
+  background:rgba(255,255,255,.1);color:#fff;font-size:11px;cursor:default;
+  font-family:inherit;
+}
+.reader-btn:hover { background:rgba(255,255,255,.25); }
+.reader-btn.active { background:#0078d7;border-color:#0078d7; }
+.reader-lang-toggle {
+  display:flex;border:1px solid rgba(255,255,255,.3);border-radius:3px;overflow:hidden;
+}
+.reader-lang-toggle button {
+  padding:2px 8px;background:transparent;border:none;color:rgba(255,255,255,.6);
+  font-size:11px;cursor:default;font-family:inherit;
+}
+.reader-lang-toggle button.active { background:#0078d7;color:#fff; }
+.reader-source-bar {
+  display:flex;gap:8px;align-items:center;padding:5px 14px;
+  background:#f0f0f0;border-bottom:1px solid #ddd;font-size:11px;color:#666;flex-shrink:0;
+}
+.reader-source-bar a { color:#0055cc;text-decoration:none; }
+.reader-source-bar a:hover { text-decoration:underline; }
+.reader-body {
+  flex:1;overflow-y:auto;padding:24px 40px 40px;
+  font-size:15px;line-height:1.85;color:#222;background:#fafafa;
+}
+.reader-body.dark { background:#1a1a2e;color:#e0e0e0; }
+.reader-body.sepia { background:#f5ead0;color:#3b2e1a; }
+.reader-top-image {
+  width:100%;max-height:300px;object-fit:cover;border-radius:4px;margin-bottom:20px;
+}
+.reader-title { font-size:22px;font-weight:bold;margin-bottom:6px;line-height:1.3; }
+.reader-title-sub { font-size:14px;color:#888;margin-bottom:20px; }
+.reader-content { white-space:pre-wrap;word-break:break-word; }
+.reader-loading {
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  height:200px;gap:12px;color:#888;font-size:13px;
+}
+.reader-spinner {
+  width:32px;height:32px;border:3px solid #ddd;border-top-color:#0078d7;
+  border-radius:50%;animation:spin .8s linear infinite;
+}
+.reader-error { padding:30px;text-align:center;color:#c00;font-size:13px; }
+.news-card-has-content::after {
+  content:'📄';font-size:10px;margin-left:4px;opacity:.6;
+}
 </style>
 </head>
 <body>
@@ -1242,6 +1323,29 @@ body {
     </div>
     <div class="stock-grid" id="stockGrid">
       <div class="stock-empty">ティッカーを追加してください<br><span style="font-size:11px;color:#bbb">例: AAPL, MSFT, 7203.T（東証は.T付き）, ^N225（日経平均）</span></div>
+    </div>
+  </div>
+
+  <!-- リーダービュー オーバーレイ -->
+  <div class="reader-overlay" id="readerOverlay" style="display:none" onclick="closeReader(event)">
+    <div class="reader-panel" onclick="event.stopPropagation()">
+      <div class="reader-header">
+        <div class="reader-header-title" id="readerHeaderTitle">記事を読み込み中...</div>
+        <div class="reader-controls">
+          <div class="reader-lang-toggle" id="readerLangToggle">
+            <button id="readerBtnJa" class="active" onclick="readerSetLang('ja')">日本語</button>
+            <button id="readerBtnOrig" onclick="readerSetLang('orig')">原文</button>
+          </div>
+          <button class="reader-btn" id="readerBtnSepia" onclick="readerCycleTheme()">テーマ</button>
+          <button class="reader-btn" onclick="readerFontSize(-1)">A-</button>
+          <button class="reader-btn" onclick="readerFontSize(+1)">A+</button>
+          <button class="reader-btn" onclick="closeReader()">✕</button>
+        </div>
+      </div>
+      <div class="reader-source-bar" id="readerSourceBar"></div>
+      <div class="reader-body" id="readerBody">
+        <div class="reader-loading"><div class="reader-spinner"></div>読み込み中...</div>
+      </div>
     </div>
   </div>
 
@@ -1828,6 +1932,7 @@ async function loadNews(page = 1) {
     return;
   }
 
+  _currentNewsData = data.articles;
   el.innerHTML = data.articles.map(a => newsCardHTML(a)).join('');
 
   // pager
@@ -2090,6 +2195,109 @@ function setMainTab(tab) {
     setTab(tab);
   }
 }
+
+
+// ニュースカードクリックでリーダーを開く
+function _newsCardClick(event, articleId) {
+  // _currentNewsArticles から該当記事を探す
+  const a = (_currentNewsData || []).find(x => x.id === articleId);
+  if (a) openReader(articleId, a);
+}
+let _currentNewsData = [];
+
+// ── リーダービュー ──────────────────────────────────────────────────────────
+let _readerArticle = null;
+let _readerContent = null;
+let _readerLang    = 'ja';
+let _readerTheme   = 'light';
+let _readerFontSize = 15;
+const _READER_THEMES = ['light', 'sepia', 'dark'];
+
+async function openReader(articleId, articleData) {
+  _readerArticle = articleData;
+  _readerContent = null;
+
+  const overlay = document.getElementById('readerOverlay');
+  const body    = document.getElementById('readerBody');
+  const hTitle  = document.getElementById('readerHeaderTitle');
+  const srcBar  = document.getElementById('readerSourceBar');
+
+  overlay.style.display = 'flex';
+  body.innerHTML = '<div class="reader-loading"><div class="reader-spinner"></div>記事を取得・翻訳中...</div>';
+  hTitle.textContent = articleData.title_ja || articleData.title;
+
+  srcBar.innerHTML =
+    '<span>' + esc(articleData.source_name) + '</span>' +
+    '<span>•</span>' +
+    '<a href="' + esc(articleData.url) + '" target="_blank">元記事を開く ↗</a>' +
+    (articleData.pub_date ? '<span>• ' + new Date(articleData.pub_date * 1000).toLocaleDateString('ja-JP') + '</span>' : '');
+
+  // 本文取得
+  try {
+    const data = await fetch('/api/news/' + encodeURIComponent(articleId) + '/content').then(r => r.json());
+    if (data.error) throw new Error(data.error);
+    _readerContent = data;
+    _renderReaderBody();
+  } catch(e) {
+    body.innerHTML = '<div class="reader-error">取得失敗: ' + esc(e.message) + '<br><br><a href="' + esc(articleData.url) + '" target="_blank">元サイトで読む ↗</a></div>';
+  }
+}
+
+function _renderReaderBody() {
+  if (!_readerContent) return;
+  const body   = document.getElementById('readerBody');
+  const a      = _readerArticle;
+  const c      = _readerContent;
+
+  // テーマ
+  body.className = 'reader-body' + (_readerTheme !== 'light' ? ' ' + _readerTheme : '');
+  body.style.fontSize = _readerFontSize + 'px';
+
+  const title    = _readerLang === 'ja' ? (a.title_ja || a.title) : a.title;
+  const titleSub = _readerLang === 'ja' && a.title_ja ? a.title : '';
+  const text     = _readerLang === 'ja' ? (c.content_ja || c.content || '翻訳できませんでした') : (c.content || '');
+
+  let html = '';
+  if (c.top_image) {
+    html += '<img class="reader-top-image" src="' + esc(c.top_image) + '" onerror="this.style.display=\'none\'" loading="lazy">';
+  }
+  html += '<div class="reader-title">' + esc(title) + '</div>';
+  if (titleSub) html += '<div class="reader-title-sub">' + esc(titleSub) + '</div>';
+  html += '<div class="reader-content">' + esc(text) + '</div>';
+
+  body.innerHTML = html;
+
+  // 言語トグルボタン状態更新
+  document.getElementById('readerBtnJa').classList.toggle('active', _readerLang === 'ja');
+  document.getElementById('readerBtnOrig').classList.toggle('active', _readerLang === 'orig');
+}
+
+function readerSetLang(lang) {
+  _readerLang = lang;
+  _renderReaderBody();
+}
+
+function readerCycleTheme() {
+  const idx = _READER_THEMES.indexOf(_readerTheme);
+  _readerTheme = _READER_THEMES[(idx + 1) % _READER_THEMES.length];
+  _renderReaderBody();
+}
+
+function readerFontSize(delta) {
+  _readerFontSize = Math.max(12, Math.min(24, _readerFontSize + delta));
+  _renderReaderBody();
+}
+
+function closeReader(event) {
+  if (event && event.target !== document.getElementById('readerOverlay')) return;
+  document.getElementById('readerOverlay').style.display = 'none';
+  _readerArticle = null;
+  _readerContent = null;
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.getElementById('readerOverlay').style.display = 'none';
+});
 
 </script>
 </body>
