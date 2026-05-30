@@ -225,6 +225,32 @@ const _STOCKS_FILE = path.resolve(
   'stocks.json'
 );
 
+// ─── ユーザー設定（prefs.json） ───────────────────────────────────────────────
+const _PREFS_FILE = path.resolve(
+  process.env.PORTABLE_EXECUTABLE_DIR || process.cwd(),
+  'prefs.json'
+);
+
+const _DEFAULT_PREFS = {
+  searchEngine:     'google',   // google / bing / duckduckgo / brave / yahoo_jp / startpage
+  searchEngineNews: 'google',   // ニュース記事タイトル検索用（同上）
+  readerTheme:      'light',    // light / sepia / dark
+  readerFontSize:   15,
+};
+
+function _loadPrefs() {
+  try {
+    if (fs.existsSync(_PREFS_FILE)) {
+      return { ..._DEFAULT_PREFS, ...JSON.parse(fs.readFileSync(_PREFS_FILE, 'utf8')) };
+    }
+  } catch(_) {}
+  return { ..._DEFAULT_PREFS };
+}
+
+function _savePrefs(prefs) {
+  try { fs.writeFileSync(_PREFS_FILE, JSON.stringify(prefs, null, 2)); } catch(_) {}
+}
+
 function _loadStockTickers() {
   try {
     if (fs.existsSync(_STOCKS_FILE)) {
@@ -337,6 +363,24 @@ function createServer() {
         });
         res.end('\uFEFF' + handleExportCsv()); // BOM for Excel
         return;
+      }
+
+      if (pathname === '/api/prefs') {
+        if (req.method === 'POST') {
+          let body = '';
+          req.on('data', chunk => { body += chunk; });
+          req.on('end', () => {
+            try {
+              const incoming = JSON.parse(body);
+              const current  = _loadPrefs();
+              const merged   = { ...current, ...incoming };
+              _savePrefs(merged);
+              _json(res, { ok: true, prefs: merged });
+            } catch(e) { _json(res, { ok: false, error: e.message }); }
+          });
+          return;
+        }
+        return _json(res, _loadPrefs());
       }
 
       if (pathname === '/api/stocks') {
@@ -1112,6 +1156,49 @@ body {
 .news-card-has-content::after {
   content:'📄';font-size:10px;margin-left:4px;opacity:.6;
 }
+
+/* ── 設定パネル ── */
+.settings-overlay {
+  position:fixed;inset:0;z-index:10000;
+  background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;
+}
+.settings-panel {
+  background:#fff;width:420px;border-radius:6px;
+  box-shadow:0 8px 32px rgba(0,0,0,.3);overflow:hidden;
+}
+.settings-header {
+  display:flex;align-items:center;padding:10px 14px;
+  background:#1e1e2e;color:#fff;font-size:13px;font-weight:bold;
+}
+.settings-header span { flex:1; }
+.settings-header button {
+  background:transparent;border:none;color:#fff;font-size:16px;cursor:default;padding:0 4px;
+}
+.settings-body { padding:16px 18px;display:flex;flex-direction:column;gap:14px; }
+.settings-section { display:flex;flex-direction:column;gap:6px; }
+.settings-section label {
+  font-size:11px;font-weight:bold;color:#555;text-transform:uppercase;letter-spacing:.5px;
+}
+.settings-row {
+  display:flex;align-items:center;gap:8px;font-size:12px;color:#333;
+}
+.settings-row span { min-width:130px;color:#555; }
+.settings-row select {
+  flex:1;height:24px;border:1px solid #bbb;border-radius:2px;
+  padding:0 4px;font-family:inherit;font-size:12px;background:#fff;
+}
+.settings-footer {
+  padding:10px 18px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:6px;
+}
+.settings-save-btn {
+  padding:4px 18px;background:#0078d7;color:#fff;border:none;
+  border-radius:3px;font-size:12px;font-family:inherit;cursor:default;
+}
+.settings-save-btn:hover { background:#005ea2; }
+.settings-cancel-btn {
+  padding:4px 14px;background:#f0f0f0;color:#333;
+  border:1px solid #bbb;border-radius:3px;font-size:12px;font-family:inherit;cursor:default;
+}
 </style>
 </head>
 <body>
@@ -1176,6 +1263,11 @@ body {
   <button class="tb-btn" onclick="setMainTab('stock')" id="tbStock" title="株価">
     <svg viewBox="0 0 16 16"><polyline points="1,12 5,7 8,9 12,4 15,6" fill="none" stroke="#008000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
     株価
+  </button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" onclick="openSettings()" id="tbSettings" title="設定">
+    <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.5" fill="none" stroke="#555" stroke-width="1.3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.42 1.42M11.53 11.53l1.42 1.42M3.05 12.95l1.42-1.42M11.53 4.47l1.42-1.42" stroke="#555" stroke-width="1.3" stroke-linecap="round"/></svg>
+    設定
   </button>
   <button class="tb-btn" onclick="showLog()" title="ログを確認">
     <svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="13" rx="1" fill="#fff" stroke="#888"/><path d="M3 5h10M3 8h10M3 11h6" stroke="#555" stroke-width="1.2" stroke-linecap="round"/></svg>
@@ -1306,6 +1398,7 @@ body {
       </select>
       <label>検索:</label>
       <input type="text" id="newsSearch" placeholder="タイトル検索..." oninput="_newsSearchDebounce()">
+      <button class="tb-btn" style="height:20px;padding:0 8px;font-size:11px" onclick="_newsWebSearch()" title="選択中の検索エンジンで検索">🔍 Web検索</button>
     </div>
     <div class="news-list" id="newsList">読み込み中...</div>
     <div class="news-pager" id="newsPager"></div>
@@ -1323,6 +1416,68 @@ body {
     </div>
     <div class="stock-grid" id="stockGrid">
       <div class="stock-empty">ティッカーを追加してください<br><span style="font-size:11px;color:#bbb">例: AAPL, MSFT, 7203.T（東証は.T付き）, ^N225（日経平均）</span></div>
+    </div>
+  </div>
+
+
+  <!-- 設定パネル -->
+  <div class="settings-overlay" id="settingsOverlay" style="display:none" onclick="if(event.target===this)closeSettings()">
+    <div class="settings-panel">
+      <div class="settings-header">
+        <span>⚙ 設定</span>
+        <button onclick="closeSettings()">✕</button>
+      </div>
+      <div class="settings-body">
+        <div class="settings-section">
+          <label>検索エンジン</label>
+          <div class="settings-row">
+            <span>ニュース内検索</span>
+            <select id="prefSearchEngine">
+              <option value="google">Google</option>
+              <option value="bing">Bing</option>
+              <option value="duckduckgo">DuckDuckGo</option>
+              <option value="brave">Brave Search</option>
+              <option value="yahoo_jp">Yahoo! Japan</option>
+              <option value="startpage">Startpage</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <span>記事タイトル検索</span>
+            <select id="prefSearchEngineNews">
+              <option value="google">Google</option>
+              <option value="bing">Bing</option>
+              <option value="duckduckgo">DuckDuckGo</option>
+              <option value="brave">Brave Search</option>
+              <option value="yahoo_jp">Yahoo! Japan</option>
+              <option value="startpage">Startpage</option>
+            </select>
+          </div>
+        </div>
+        <div class="settings-section">
+          <label>リーダービュー</label>
+          <div class="settings-row">
+            <span>デフォルトテーマ</span>
+            <select id="prefReaderTheme">
+              <option value="light">ライト</option>
+              <option value="sepia">セピア</option>
+              <option value="dark">ダーク</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <span>デフォルト文字サイズ</span>
+            <select id="prefReaderFontSize">
+              <option value="13">小 (13px)</option>
+              <option value="15">中 (15px)</option>
+              <option value="17">大 (17px)</option>
+              <option value="19">特大 (19px)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="settings-footer">
+        <button class="settings-cancel-btn" onclick="closeSettings()">キャンセル</button>
+        <button class="settings-save-btn" onclick="saveSettings()">保存</button>
+      </div>
     </div>
   </div>
 
@@ -2226,10 +2381,13 @@ async function openReader(articleId, articleData) {
   body.innerHTML = '<div class="reader-loading"><div class="reader-spinner"></div>記事を取得・翻訳中...</div>';
   hTitle.textContent = articleData.title_ja || articleData.title;
 
+  const titleForSearch = articleData.title_ja || articleData.title;
   srcBar.innerHTML =
     '<span>' + esc(articleData.source_name) + '</span>' +
     '<span>•</span>' +
     '<a href="' + esc(articleData.url) + '" target="_blank">元記事を開く ↗</a>' +
+    '<span>•</span>' +
+    '<a href="#" onclick="searchArticle(' + JSON.stringify(titleForSearch) + ');return false">🔍 検索で調べる</a>' +
     (articleData.pub_date ? '<span>• ' + new Date(articleData.pub_date * 1000).toLocaleDateString('ja-JP') + '</span>' : '');
 
   // 本文取得
@@ -2298,6 +2456,83 @@ function closeReader(event) {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') document.getElementById('readerOverlay').style.display = 'none';
 });
+
+
+// ── 設定 ────────────────────────────────────────────────────────────────────
+let _prefs = {
+  searchEngine:     'google',
+  searchEngineNews: 'google',
+  readerTheme:      'light',
+  readerFontSize:   15,
+};
+
+// 検索エンジンURL定義
+const SEARCH_ENGINES = {
+  google:     q => 'https://www.google.com/search?q=' + encodeURIComponent(q),
+  bing:       q => 'https://www.bing.com/search?q=' + encodeURIComponent(q),
+  duckduckgo: q => 'https://duckduckgo.com/?q=' + encodeURIComponent(q),
+  brave:      q => 'https://search.brave.com/search?q=' + encodeURIComponent(q),
+  yahoo_jp:   q => 'https://search.yahoo.co.jp/search?p=' + encodeURIComponent(q),
+  startpage:  q => 'https://www.startpage.com/search?q=' + encodeURIComponent(q),
+};
+
+function _searchUrl(query, type = 'searchEngine') {
+  const engine = _prefs[type] || 'google';
+  const fn = SEARCH_ENGINES[engine] || SEARCH_ENGINES.google;
+  return fn(query);
+}
+
+async function _loadPrefs() {
+  try {
+    const data = await api('/api/prefs');
+    if (data) _prefs = { ..._prefs, ...data };
+    // リーダーのデフォルト値に反映
+    _readerTheme    = _prefs.readerTheme    || 'light';
+    _readerFontSize = parseInt(_prefs.readerFontSize) || 15;
+  } catch(_) {}
+}
+
+function openSettings() {
+  document.getElementById('prefSearchEngine').value     = _prefs.searchEngine     || 'google';
+  document.getElementById('prefSearchEngineNews').value = _prefs.searchEngineNews || 'google';
+  document.getElementById('prefReaderTheme').value      = _prefs.readerTheme      || 'light';
+  document.getElementById('prefReaderFontSize').value   = String(_prefs.readerFontSize || 15);
+  document.getElementById('settingsOverlay').style.display = 'flex';
+}
+
+function closeSettings() {
+  document.getElementById('settingsOverlay').style.display = 'none';
+}
+
+async function saveSettings() {
+  _prefs.searchEngine     = document.getElementById('prefSearchEngine').value;
+  _prefs.searchEngineNews = document.getElementById('prefSearchEngineNews').value;
+  _prefs.readerTheme      = document.getElementById('prefReaderTheme').value;
+  _prefs.readerFontSize   = parseInt(document.getElementById('prefReaderFontSize').value);
+
+  await fetch('/api/prefs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(_prefs),
+  });
+
+  // 即時反映
+  _readerTheme    = _prefs.readerTheme;
+  _readerFontSize = _prefs.readerFontSize;
+
+  closeSettings();
+}
+
+// 外部検索を開く（記事タイトルをデフォルト検索エンジンで）
+function searchArticle(title) {
+  window.open(_searchUrl(title, 'searchEngineNews'), '_blank');
+}
+
+function _newsWebSearch() {
+  const q = (document.getElementById('newsSearch')?.value || '').trim();
+  if (!q) return;
+  window.open(_searchUrl(q, 'searchEngine'), '_blank');
+}
 
 </script>
 </body>
