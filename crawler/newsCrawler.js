@@ -10,6 +10,7 @@ const { fetchWithRetry, sleep } = require('./queue');
 const log    = require('./logger');
 const newsDb = require('./newsDb');
 const { translateArticle } = require('./translator');
+const { runArticleFetchBatch } = require('./articleFetcher');
 
 // ─── RSSフィード定義 ──────────────────────────────────────────────────────────
 
@@ -95,10 +96,12 @@ async function runNewsCrawl({ maxPerSource = 10, translateAll = true } = {}) {
         const isNew = newsDb.upsertArticle(item);
         if (isNew) {
           added++;
-          // 英語記事は翻訳キューに追加
+          // 翻訳キューに追加
           if (source.lang === 'en' && translateAll) {
             newsDb.queueTranslation(item.id);
           }
+          // 本文フェッチキューに追加
+          newsDb.queueContentFetch(item.id);
         }
       }
       if (added > 0) log.info('[news]', source.name, '+' + added);
@@ -115,6 +118,13 @@ async function runNewsCrawl({ maxPerSource = 10, translateAll = true } = {}) {
   // 翻訳キューを処理
   if (translateAll) {
     await _processTranslationQueue();
+  }
+
+  // 本文フェッチバッチ（新着3件だけ）
+  try {
+    await runArticleFetchBatch(3);
+  } catch (e) {
+    log.warn('[news] article fetch batch error', e.message);
   }
 
   return { total, errors };
