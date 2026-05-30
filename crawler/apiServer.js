@@ -1199,6 +1199,340 @@ body {
   padding:4px 14px;background:#f0f0f0;color:#333;
   border:1px solid #bbb;border-radius:3px;font-size:12px;font-family:inherit;cursor:default;
 }
+
+/* ══════════════════════════════════════════════════════
+   豪華アニメーション CSS
+   ══════════════════════════════════════════════════════ */
+
+/* ── キーフレーム定義 ── */
+@keyframes fadeInUp {
+  from { opacity:0; transform:translateY(14px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+@keyframes fadeInDown {
+  from { opacity:0; transform:translateY(-14px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+@keyframes fadeInLeft {
+  from { opacity:0; transform:translateX(-18px); }
+  to   { opacity:1; transform:translateX(0); }
+}
+@keyframes fadeInScale {
+  from { opacity:0; transform:scale(.92); }
+  to   { opacity:1; transform:scale(1); }
+}
+@keyframes slideInRight {
+  from { opacity:0; transform:translateX(30px); }
+  to   { opacity:1; transform:translateX(0); }
+}
+@keyframes popIn {
+  0%   { opacity:0; transform:scale(.7); }
+  70%  { transform:scale(1.06); }
+  100% { opacity:1; transform:scale(1); }
+}
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+@keyframes gradientShift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0,120,215,.35); }
+  50%       { box-shadow: 0 0 0 6px rgba(0,120,215,0); }
+}
+@keyframes ripple {
+  to { transform: scale(4); opacity: 0; }
+}
+@keyframes countUp {
+  from { opacity:0; transform:translateY(6px) scale(.9); }
+  to   { opacity:1; transform:translateY(0) scale(1); }
+}
+@keyframes badgePop {
+  0%   { transform:scale(0) rotate(-10deg); }
+  60%  { transform:scale(1.2) rotate(3deg); }
+  100% { transform:scale(1) rotate(0deg); }
+}
+@keyframes spinnerArc {
+  0%   { stroke-dashoffset: 200; }
+  100% { stroke-dashoffset: -200; }
+}
+@keyframes waveBar {
+  0%,100% { transform:scaleY(.4); }
+  50%      { transform:scaleY(1); }
+}
+@keyframes floatUp {
+  0%   { opacity:1; transform:translateY(0) scale(1); }
+  100% { opacity:0; transform:translateY(-40px) scale(.6); }
+}
+
+/* ── ツールバーボタン ── */
+.tb-btn {
+  position: relative;
+  overflow: hidden;
+  transition: background .18s, border-color .18s, color .18s,
+              box-shadow .18s, transform .12s;
+}
+.tb-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(0,120,215,.22);
+}
+.tb-btn:active {
+  transform: translateY(0) scale(.96);
+  box-shadow: none;
+}
+/* リップルエフェクト */
+.tb-btn .ripple-el {
+  position:absolute;border-radius:50%;
+  background:rgba(0,120,215,.25);
+  width:12px;height:12px;margin:-6px;
+  pointer-events:none;
+  animation: ripple .5s ease-out forwards;
+}
+
+/* ── タブ切り替え時のスライドアニメ ── */
+.main-area {
+  animation: fadeInScale .22s ease both;
+}
+.news-list {
+  transition: opacity .18s;
+}
+.news-list.loading {
+  opacity: 0;
+}
+
+/* ── ニュースカード ── */
+.news-card {
+  transition: background .15s, border-color .18s,
+              transform .18s cubic-bezier(.34,1.56,.64,1),
+              box-shadow .18s;
+  will-change: transform;
+}
+.news-card:hover {
+  transform: translateY(-2px) scale(1.005);
+  box-shadow: 0 6px 20px rgba(0,0,0,.1);
+  border-color: #0078d7;
+  background: #f0f7ff;
+}
+.news-card:active {
+  transform: scale(.99);
+  box-shadow: 0 2px 6px rgba(0,0,0,.08);
+}
+/* カード入場アニメ（stagger） */
+.news-card {
+  opacity: 0;
+  animation: fadeInUp .3s ease both;
+}
+.news-card:nth-child(1)  { animation-delay: .00s }
+.news-card:nth-child(2)  { animation-delay: .03s }
+.news-card:nth-child(3)  { animation-delay: .06s }
+.news-card:nth-child(4)  { animation-delay: .09s }
+.news-card:nth-child(5)  { animation-delay: .12s }
+.news-card:nth-child(6)  { animation-delay: .15s }
+.news-card:nth-child(7)  { animation-delay: .18s }
+.news-card:nth-child(8)  { animation-delay: .20s }
+.news-card:nth-child(9)  { animation-delay: .22s }
+.news-card:nth-child(10) { animation-delay: .24s }
+.news-card:nth-child(n+11) { animation-delay: .26s }
+
+/* ── ニュースバッジ ── */
+.news-badge {
+  animation: badgePop .35s cubic-bezier(.34,1.56,.64,1) both;
+  transition: transform .15s, filter .15s;
+}
+.news-card:hover .news-badge {
+  transform: scale(1.08);
+  filter: brightness(1.12);
+}
+
+/* ── スケルトン ローディング ── */
+.skeleton {
+  background: linear-gradient(90deg, #eee 25%, #f8f8f8 50%, #eee 75%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s infinite linear;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+/* ── リーダーパネル ── */
+.reader-panel {
+  animation: popIn .28s cubic-bezier(.34,1.56,.64,1) both;
+}
+.reader-overlay {
+  animation: none;
+  transition: background .2s;
+}
+.reader-body {
+  transition: background .3s, color .3s, font-size .15s;
+}
+.reader-content {
+  animation: fadeInUp .4s ease both;
+}
+.reader-top-image {
+  animation: fadeInScale .5s ease both;
+  transition: transform .3s;
+}
+.reader-top-image:hover {
+  transform: scale(1.01);
+}
+
+/* ── 設定パネル ── */
+.settings-panel {
+  animation: popIn .25s cubic-bezier(.34,1.56,.64,1) both;
+}
+.settings-row select {
+  transition: border-color .15s, box-shadow .15s;
+}
+.settings-row select:focus {
+  border-color: #0078d7;
+  box-shadow: 0 0 0 3px rgba(0,120,215,.18);
+  outline: none;
+}
+.settings-save-btn {
+  transition: background .15s, transform .12s, box-shadow .15s;
+}
+.settings-save-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,120,215,.3);
+}
+.settings-save-btn:active { transform:scale(.97); }
+
+/* ── 株価カード ── */
+.stock-card {
+  transition: transform .2s cubic-bezier(.34,1.56,.64,1),
+              box-shadow .2s, border-color .2s;
+}
+.stock-card:hover {
+  transform: translateY(-3px) scale(1.01);
+  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+}
+.stock-price {
+  transition: color .4s, opacity .3s;
+}
+/* 株価更新フラッシュ */
+.stock-price.flash-up {
+  animation: flashGreen .6s ease;
+}
+.stock-price.flash-down {
+  animation: flashRed .6s ease;
+}
+@keyframes flashGreen {
+  0%   { background:#00cc6620; }
+  100% { background:transparent; }
+}
+@keyframes flashRed {
+  0%   { background:#cc000020; }
+  100% { background:transparent; }
+}
+
+/* ── プログレスバー ── */
+.progress-fill {
+  background: linear-gradient(90deg, #0055cc, #00aaff, #0055cc);
+  background-size: 200% 100%;
+  animation: gradientShift 2s ease infinite;
+  transition: width .5s cubic-bezier(.4,0,.2,1);
+}
+.progress-fill.indeterminate {
+  animation: slide 1.2s ease-in-out infinite,
+             gradientShift 2s ease infinite;
+}
+
+/* ── ページャーボタン ── */
+.news-pager-btn {
+  transition: background .15s, transform .12s, box-shadow .12s;
+  cursor: default;
+}
+.news-pager-btn:hover {
+  transform: scale(1.08);
+  box-shadow: 0 2px 8px rgba(0,120,215,.2);
+}
+.news-pager-btn:active { transform: scale(.94); }
+
+/* ── フィルターバー input/select ── */
+.filterbar input:focus, .news-filters input:focus {
+  border-color: #0078d7;
+  box-shadow: 0 0 0 3px rgba(0,120,215,.15);
+  transition: border-color .15s, box-shadow .15s;
+}
+.news-filters select {
+  transition: border-color .15s;
+}
+.news-filters select:focus {
+  border-color: #0078d7;
+  outline: none;
+}
+
+/* ── ステータスバー カウンター ── */
+.status-num-anim {
+  display: inline-block;
+  animation: countUp .4s cubic-bezier(.34,1.56,.64,1) both;
+}
+
+/* ── work-row ── */
+.work-row {
+  transition: background .1s;
+}
+.work-row.selected {
+  animation: fadeInLeft .15s ease both;
+}
+
+/* ── モーダル ── */
+.modal-box {
+  animation: popIn .22s cubic-bezier(.34,1.56,.64,1) both;
+}
+
+/* ── ローディングスピナー（リーダー） ── */
+.reader-spinner {
+  border: none;
+  width: 36px; height: 36px;
+}
+.reader-spinner::after {
+  content: '';
+  display: block;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: #0078d7;
+  border-right-color: #0055aa;
+  animation: spin .7s cubic-bezier(.4,0,.2,1) infinite;
+}
+
+/* ── ニュース統計バー ── */
+.news-stat-num {
+  transition: color .3s;
+  display: inline-block;
+  animation: countUp .5s ease both;
+}
+
+/* ── スクロールバー ── */
+.news-list::-webkit-scrollbar,
+.reader-body::-webkit-scrollbar,
+.works-list::-webkit-scrollbar { width:6px; }
+.news-list::-webkit-scrollbar-track,
+.reader-body::-webkit-scrollbar-track,
+.works-list::-webkit-scrollbar-track { background:#f0f0f0; }
+.news-list::-webkit-scrollbar-thumb,
+.reader-body::-webkit-scrollbar-thumb,
+.works-list::-webkit-scrollbar-thumb {
+  background: linear-gradient(to bottom, #0078d7, #0055aa);
+  border-radius: 3px;
+  transition: background .2s;
+}
+.news-list::-webkit-scrollbar-thumb:hover,
+.reader-body::-webkit-scrollbar-thumb:hover { background:#0055aa; }
+
+/* ── ページ読み込み時のフェードイン ── */
+body {
+  animation: fadeInDown .4s ease both;
+}
+.toolbar {
+  animation: fadeInDown .3s ease both;
+}
+.menubar {
+  animation: fadeInDown .2s ease both;
+}
 </style>
 </head>
 <body>
@@ -2535,6 +2869,62 @@ function _newsWebSearch() {
   const q = (document.getElementById('newsSearch')?.value || '').trim();
   if (!q) return;
   window.open(_searchUrl(q, 'searchEngine'), '_blank');
+}
+
+
+// ── リップルエフェクト（ツールバーボタン） ──────────────────────────────────
+document.addEventListener('mousedown', e => {
+  const btn = e.target.closest('.tb-btn, .news-pager-btn, .reader-btn, .settings-save-btn');
+  if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+  const el = document.createElement('span');
+  el.className = 'ripple-el';
+  el.style.left = (e.clientX - rect.left) + 'px';
+  el.style.top  = (e.clientY - rect.top) + 'px';
+  btn.appendChild(el);
+  el.addEventListener('animationend', () => el.remove());
+});
+
+// ── ニュースリスト ローディングフェード ────────────────────────────────────
+const _origLoadNews = typeof loadNews === 'function' ? loadNews : null;
+if (_origLoadNews) {
+  window.loadNews = async function(page) {
+    const list = document.getElementById('newsList');
+    if (list) list.classList.add('loading');
+    await _origLoadNews(page);
+    if (list) {
+      list.classList.remove('loading');
+      // stagger再計算のためDOMを軽くトリガー
+      list.querySelectorAll('.news-card').forEach((el, i) => {
+        el.style.animationDelay = Math.min(i * 0.03, 0.26) + 's';
+      });
+    }
+  };
+}
+
+// ── 株価更新時のフラッシュ ──────────────────────────────────────────────────
+const _origRenderStockGrid = typeof _renderStockGrid === 'function' ? _renderStockGrid : null;
+const _prevPrices = {};
+if (_origRenderStockGrid) {
+  window._renderStockGrid = function() {
+    _origRenderStockGrid();
+    // 更新後に価格変化をチェックしてフラッシュ
+    setTimeout(() => {
+      Object.entries(_stocks || {}).forEach(([ticker, s]) => {
+        if (!s?.data) return;
+        const price = s.data.price;
+        const prev  = _prevPrices[ticker];
+        _prevPrices[ticker] = price;
+        if (prev == null) return;
+        const el = document.querySelector(`[data-ticker="${ticker}"] .stock-price`);
+        if (!el) return;
+        el.classList.remove('flash-up', 'flash-down');
+        void el.offsetWidth; // reflow
+        if (price > prev)      el.classList.add('flash-up');
+        else if (price < prev) el.classList.add('flash-down');
+      });
+    }, 50);
+  };
 }
 
 </script>
