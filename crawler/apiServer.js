@@ -1439,6 +1439,7 @@ body {
               <option value="brave">Brave Search</option>
               <option value="yahoo_jp">Yahoo! Japan</option>
               <option value="startpage">Startpage</option>
+              <option value="ecosia">Ecosia</option>
             </select>
           </div>
           <div class="settings-row">
@@ -1450,6 +1451,7 @@ body {
               <option value="brave">Brave Search</option>
               <option value="yahoo_jp">Yahoo! Japan</option>
               <option value="startpage">Startpage</option>
+              <option value="ecosia">Ecosia</option>
             </select>
           </div>
         </div>
@@ -2474,6 +2476,7 @@ const SEARCH_ENGINES = {
   brave:      q => 'https://search.brave.com/search?q=' + encodeURIComponent(q),
   yahoo_jp:   q => 'https://search.yahoo.co.jp/search?p=' + encodeURIComponent(q),
   startpage:  q => 'https://www.startpage.com/search?q=' + encodeURIComponent(q),
+  ecosia:     q => 'https://www.ecosia.org/search?q=' + encodeURIComponent(q),
 };
 
 function _searchUrl(query, type = 'searchEngine') {
