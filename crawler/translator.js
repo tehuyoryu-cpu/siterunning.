@@ -269,4 +269,46 @@ function _splitText(text, maxLen) {
   return parts;
 }
 
-module.exports = { translateArticle };
+
+// ─── 段落リスト翻訳（本文用） ────────────────────────────────────────────────
+// paragraphs: [{tag, text}, ...] → 翻訳済みテキストをまとめて返す
+
+async function translateParagraphs(paragraphs) {
+  if (!paragraphs || !paragraphs.length) return '';
+
+  const results = [];
+  // 500文字ずつDeepLに投げる
+  let chunk = [], chunkLen = 0;
+  const CHUNK_SIZE = 800;
+
+  async function flushChunk() {
+    if (!chunk.length) return;
+    const text = chunk.map(p => p.text).join('\n\n');
+    let translated;
+    try {
+      translated = await _deeplWeb(text, 'JA');
+    } catch (e) {
+      try {
+        translated = await _googleTranslate(text, 'en', 'ja');
+      } catch (e2) {
+        translated = text; // 失敗したらそのまま
+      }
+    }
+    results.push(translated);
+    chunk = [];
+    chunkLen = 0;
+    await _sleep(500);
+  }
+
+  for (const p of paragraphs) {
+    chunk.push(p);
+    chunkLen += p.text.length;
+    if (chunkLen >= CHUNK_SIZE) await flushChunk();
+  }
+  await flushChunk();
+
+  return results.join('\n\n');
+}
+
+module.exports = { translateArticle, translateParagraphs };
+
