@@ -20,8 +20,9 @@ const db     = require('./db');
 const log    = require('./logger');
 const { runDiscovery }   = require('./discovery');
 const { runDetailFetch } = require('./detailFetcher');
-const { runNewsCrawl }   = require('./newsCrawler');
-const newsDb             = require('./newsDb');
+const { runNewsCrawl }       = require('./newsCrawler');
+const { runArticleFetchBatch } = require('./articleFetcher');
+const newsDb                 = require('./newsDb');
 
 // Lock flags prevent overlapping runs of the same job type
 const _running = {
@@ -29,6 +30,7 @@ const _running = {
   detail:    false,
   saleBoost: false,
   news:      false,
+  article:   false,
 };
 
 // ─── discovery job ───────────────────────────────────────────────────────────
@@ -131,6 +133,22 @@ function _startNewsJob() {
   log.info('[scheduler] news job scheduled (every 1h)');
 }
 
+function _startArticleFetchJob() {
+  // 本文フェッチは30分ごと（5件ずつ）
+  cron.schedule('*/30 * * * *', async () => {
+    if (_running.article) return;
+    _running.article = true;
+    try {
+      await runArticleFetchBatch(5);
+    } catch (err) {
+      log.error('[scheduler] article fetch error', err.message);
+    } finally {
+      _running.article = false;
+    }
+  });
+  log.info('[scheduler] article fetch job scheduled (every 30min)');
+}
+
 function _startBackupJob() {
   cron.schedule('0 3 * * *', () => {
     try {
@@ -156,6 +174,7 @@ async function start() {
   _startSaleBoostJob();
   _startBackupJob();
   _startNewsJob();
+  _startArticleFetchJob();
 
   // Initial run on startup (don't wait for cron trigger)
   log.info('[scheduler] running initial passes on startup');
