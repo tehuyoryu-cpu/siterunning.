@@ -22,6 +22,8 @@
 
 const http   = require('http');
 const url    = require('url');
+const fs     = require('fs');
+const path   = require('path');
 const db     = require('./db');
 const newsDb = require('./newsDb');
 const log    = require('./logger');
@@ -215,6 +217,26 @@ function handleNewsStats() {
   return newsDb.getNewsStats();
 }
 
+// ─── Stocks永続化（サーバー側ファイルに保存） ──────────────────────────────────
+
+const _STOCKS_FILE = path.resolve(
+  process.env.PORTABLE_EXECUTABLE_DIR || process.cwd(),
+  'stocks.json'
+);
+
+function _loadStockTickers() {
+  try {
+    if (fs.existsSync(_STOCKS_FILE)) {
+      return JSON.parse(fs.readFileSync(_STOCKS_FILE, 'utf8'));
+    }
+  } catch(_) {}
+  return [];
+}
+
+function _saveStockTickers(tickers) {
+  try { fs.writeFileSync(_STOCKS_FILE, JSON.stringify(tickers)); } catch(_) {}
+}
+
 // ─── HTTP server ──────────────────────────────────────────────────────────────
 
 function createServer() {
@@ -314,6 +336,23 @@ function createServer() {
         });
         res.end('\uFEFF' + handleExportCsv()); // BOM for Excel
         return;
+      }
+
+      if (pathname === '/api/stocks') {
+        if (req.method === 'POST') {
+          let body = '';
+          req.on('data', chunk => { body += chunk; });
+          req.on('end', () => {
+            try {
+              const { tickers } = JSON.parse(body);
+              if (Array.isArray(tickers)) _saveStockTickers(tickers);
+              _json(res, { ok: true });
+            } catch(e) { _json(res, { ok: false }); }
+          });
+          return;
+        }
+        // GET
+        return _json(res, { tickers: _loadStockTickers() });
       }
 
       if (pathname === '/api/news') {
@@ -1842,39 +1881,44 @@ async function loadNewsStats() {
 // ── メインタブ切り替え（DLsite ↔ ニュース） ──────────────────────────────────
 
 // ── 株価 ────────────────────────────────────────────────────────────────────
-const STOCK_STORAGE_KEY = 'siteruns_stocks_v1';
 let _stocks = {};          // { ticker: { data, error, loading } }
 let _stockTickers = [];    // 登録順リスト
 let _stockRefreshTimer = null;
 
-function _stockLoad() {
+async function _stockLoad() {
   try {
-    const raw = localStorage.getItem(STOCK_STORAGE_KEY);
-    if (raw) _stockTickers = JSON.parse(raw);
+    const data = await api('/api/stocks');
+    if (data?.tickers) _stockTickers = data.tickers;
   } catch(_) { _stockTickers = []; }
 }
 
-function _stockSave() {
-  localStorage.setItem(STOCK_STORAGE_KEY, JSON.stringify(_stockTickers));
+async function _stockSave() {
+  try {
+    await fetch('/api/stocks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickers: _stockTickers }),
+    });
+  } catch(_) {}
 }
 
-function addStock() {
+async function addStock() {
   const input = document.getElementById('stockTickerInput');
   const ticker = (input.value || '').trim().toUpperCase();
   if (!ticker) return;
   if (_stockTickers.includes(ticker)) { input.value = ''; return; }
   _stockTickers.push(ticker);
-  _stockSave();
+  await _stockSave();
   input.value = '';
   _stocks[ticker] = { data: null, error: null, loading: true };
   _renderStockGrid();
   _fetchStock(ticker);
 }
 
-function removeStock(ticker) {
+async function removeStock(ticker) {
   _stockTickers = _stockTickers.filter(t => t !== ticker);
   delete _stocks[ticker];
-  _stockSave();
+  await _stockSave();
   _renderStockGrid();
 }
 
@@ -2003,8 +2047,8 @@ function _stockCardHTML(ticker) {
   </div>`;
 }
 
-function _stockInit() {
-  _stockLoad();
+function async _stockInit() {
+  await _stockLoad();
   if (_stockTickers.length) {
     _stockTickers.forEach(t => { _stocks[t] = { loading: true, data: null, error: null }; });
     _renderStockGrid();
