@@ -219,7 +219,33 @@ function handleNewsStats() {
 }
 
 
-      if (pathname === '/api/prefs') {
+      // 株価クオート（Yahoo Finance非公式）
+      if (pathname === '/api/quote') {
+        const ticker = query.ticker || '';
+        if (!ticker) return _json(res, { error: 'ticker required' });
+        try {
+          const data = await _fetchYahooQuote(ticker);
+          return _json(res, data);
+        } catch(e) {
+          return _json(res, { ticker, error: e.message, price: 0, change: 0, changePercent: 0 });
+        }
+      }
+
+      // 過去チャート（Yahoo Finance非公式）
+      if (pathname === '/api/chart') {
+        const ticker   = query.ticker   || '';
+        const range    = query.range    || '1mo';
+        const interval = query.interval || '1d';
+        if (!ticker) return _json(res, { error: 'ticker required' });
+        try {
+          const data = await _fetchYahooChart(ticker, range, interval);
+          return _json(res, data);
+        } catch(e) {
+          return _json(res, { ticker, error: e.message, points: [] });
+        }
+      }
+
+            if (pathname === '/api/prefs') {
         if (req.method === 'POST') {
           let body = '';
           req.on('data', chunk => { body += chunk; });
